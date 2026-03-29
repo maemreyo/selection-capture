@@ -122,8 +122,8 @@ fn main() {
 
 ```rust
 use selection_capture::{
-    CancelSignal, CaptureMetrics, CaptureMonitor, MacOSSelectionMonitor, MonitorPlatform,
-    MonitorSpamGuard,
+    CancelSignal, CaptureMetrics, CaptureMonitor, MacOSMonitorBackend, MacOSSelectionMonitor,
+    MacOSSelectionMonitorOptions, MonitorPlatform, MonitorSpamGuard,
 };
 
 struct StubMonitor;
@@ -145,6 +145,10 @@ impl CancelSignal for StopImmediately {
 }
 
 let mac_monitor = CaptureMonitor::new(MacOSSelectionMonitor::default());
+let _native_pref = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
+    poll_interval: std::time::Duration::from_millis(120),
+    backend: MacOSMonitorBackend::NativeObserverPreferred,
+});
 let cancel = StopImmediately;
 let _processed = mac_monitor.poll_until_cancelled(
     std::time::Duration::from_millis(120),
@@ -179,6 +183,7 @@ let mut metrics = CaptureMetrics::default();
 Current limitations:
 
 - Monitoring backends are polling-based (no native observer callback integration yet)
+- macOS exposes a native-observer scaffold (`NativeObserverPreferred`) that currently falls back to polling
 - No async stream integration exists yet
 - `None` from backend is treated as "no more events" by `run(...)` APIs
 - For anti-spam behavior, prefer `poll_until_cancelled_guarded(...)` with `MonitorSpamGuard`

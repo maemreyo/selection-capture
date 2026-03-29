@@ -20,7 +20,9 @@ pub use engine::{capture, try_capture};
 #[cfg(feature = "linux-alpha")]
 pub use linux::{LinuxPlatform, LinuxSelectionMonitor};
 #[cfg(target_os = "macos")]
-pub use macos::{MacOSPlatform, MacOSSelectionMonitor};
+pub use macos::{
+    MacOSMonitorBackend, MacOSPlatform, MacOSSelectionMonitor, MacOSSelectionMonitorOptions,
+};
 pub use monitor::{
     CaptureMetrics, CaptureMonitor, MethodMetrics, MonitorGuardStats, MonitorSpamGuard,
 };

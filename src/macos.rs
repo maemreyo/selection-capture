@@ -17,6 +17,20 @@ pub struct MacOSPlatform {
 pub struct MacOSSelectionMonitor {
     last_emitted: Mutex<Option<String>>,
     pub poll_interval: Duration,
+    backend: MacOSMonitorBackend,
+    native_observer_active: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MacOSMonitorBackend {
+    Polling,
+    NativeObserverPreferred,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MacOSSelectionMonitorOptions {
+    pub poll_interval: Duration,
+    pub backend: MacOSMonitorBackend,
 }
 
 impl Default for MacOSPlatform {
@@ -27,7 +41,16 @@ impl Default for MacOSPlatform {
 
 impl Default for MacOSSelectionMonitor {
     fn default() -> Self {
-        Self::new(Duration::from_millis(120))
+        Self::new_with_options(MacOSSelectionMonitorOptions::default())
+    }
+}
+
+impl Default for MacOSSelectionMonitorOptions {
+    fn default() -> Self {
+        Self {
+            poll_interval: Duration::from_millis(120),
+            backend: MacOSMonitorBackend::Polling,
+        }
     }
 }
 
@@ -104,13 +127,44 @@ impl MacOSPlatform {
 
 impl MacOSSelectionMonitor {
     pub fn new(poll_interval: Duration) -> Self {
+        Self::new_with_options(MacOSSelectionMonitorOptions {
+            poll_interval,
+            backend: MacOSMonitorBackend::Polling,
+        })
+    }
+
+    pub fn new_with_options(options: MacOSSelectionMonitorOptions) -> Self {
+        let native_observer_active = matches!(
+            options.backend,
+            MacOSMonitorBackend::NativeObserverPreferred
+        ) && try_enable_native_observer();
+
         Self {
             last_emitted: Mutex::new(None),
-            poll_interval,
+            poll_interval: options.poll_interval,
+            backend: options.backend,
+            native_observer_active,
         }
     }
 
+    pub fn backend(&self) -> MacOSMonitorBackend {
+        self.backend
+    }
+
+    pub fn native_observer_active(&self) -> bool {
+        self.native_observer_active
+    }
+
     fn next_selection_text(&self) -> Option<String> {
+        if self.native_observer_active {
+            if let Some(event) = self.next_selection_text_native() {
+                return Some(event);
+            }
+        }
+        self.next_selection_text_polling()
+    }
+
+    fn next_selection_text_polling(&self) -> Option<String> {
         if !application_is_trusted() {
             return None;
         }
@@ -126,6 +180,10 @@ impl MacOSSelectionMonitor {
         }
         *last = Some(next.clone());
         Some(next)
+    }
+
+    fn next_selection_text_native(&self) -> Option<String> {
+        None
     }
 }
 
@@ -156,6 +214,10 @@ impl MonitorPlatform for MacOSSelectionMonitor {
     fn next_selection_change(&self) -> Option<String> {
         self.next_selection_text()
     }
+}
+
+fn try_enable_native_observer() -> bool {
+    false
 }
 
 fn get_selected_text_by_ax() -> Result<String, String> {
@@ -338,5 +400,22 @@ mod tests {
     fn selection_monitor_default_poll_interval_is_stable() {
         let monitor = MacOSSelectionMonitor::default();
         assert_eq!(monitor.poll_interval, Duration::from_millis(120));
+        assert_eq!(monitor.backend(), MacOSMonitorBackend::Polling);
+        assert!(!monitor.native_observer_active());
+    }
+
+    #[test]
+    fn selection_monitor_native_preferred_falls_back_to_polling_path() {
+        let monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(75),
+            backend: MacOSMonitorBackend::NativeObserverPreferred,
+        });
+
+        assert_eq!(monitor.poll_interval, Duration::from_millis(75));
+        assert_eq!(
+            monitor.backend(),
+            MacOSMonitorBackend::NativeObserverPreferred
+        );
+        assert!(!monitor.native_observer_active());
     }
 }
