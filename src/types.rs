@@ -74,6 +74,7 @@ impl Default for RetryPolicy {
 pub struct CaptureOptions {
     pub allow_clipboard_borrow: bool,
     pub retry_policy: RetryPolicy,
+    pub interleave_method_retries: bool,
     pub collect_trace: bool,
     pub overall_timeout: Duration,
     pub strategy_override: Option<Vec<CaptureMethod>>,
@@ -84,6 +85,7 @@ impl Default for CaptureOptions {
         Self {
             allow_clipboard_borrow: true,
             retry_policy: RetryPolicy::default(),
+            interleave_method_retries: true,
             collect_trace: false,
             overall_timeout: Duration::from_millis(500),
             strategy_override: None,

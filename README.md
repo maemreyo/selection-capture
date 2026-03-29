@@ -165,6 +165,7 @@ let options = CaptureOptions {
         clipboard: vec![Duration::from_millis(120)],
         poll_interval: Duration::from_millis(20),
     },
+    interleave_method_retries: true,
     collect_trace: true,
     allow_clipboard_borrow: true,
     overall_timeout: Duration::from_millis(500),

@@ -78,7 +78,9 @@ pub fn capture(
             );
         }
 
-        let Some(next_index) = select_next_scheduled_attempt(&schedule) else {
+        let Some(next_index) =
+            select_next_scheduled_attempt(&schedule, options.interleave_method_retries)
+        else {
             break;
         };
         let next = &schedule[next_index];
@@ -414,7 +416,17 @@ fn build_capture_schedule(
     schedule
 }
 
-fn select_next_scheduled_attempt(schedule: &[ScheduledAttempt]) -> Option<usize> {
+fn select_next_scheduled_attempt(
+    schedule: &[ScheduledAttempt],
+    interleave_method_retries: bool,
+) -> Option<usize> {
+    if !interleave_method_retries {
+        return schedule
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, attempt)| attempt.order)
+            .map(|(index, _)| index);
+    }
     schedule
         .iter()
         .enumerate()
@@ -764,6 +776,7 @@ mod tests {
             vec![Duration::ZERO, Duration::from_millis(60)];
         options.retry_policy.range_accessibility = vec![Duration::ZERO];
         options.retry_policy.clipboard = vec![Duration::from_millis(120)];
+        options.interleave_method_retries = true;
 
         let out = capture(&platform, &store, &cancel, &[&adapter], &options);
         match out {
@@ -784,6 +797,59 @@ mod tests {
                     vec![
                         CaptureMethod::AccessibilityPrimary,
                         CaptureMethod::AccessibilityRange
+                    ]
+                );
+            }
+            other => panic!("expected success, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn capture_can_disable_interleaving_and_keep_sequential_retry_order() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.test".into(),
+                name: "Test".into(),
+            }),
+            responses: Arc::new(Mutex::new(vec![
+                PlatformAttemptResult::EmptySelection,
+                PlatformAttemptResult::Success("primary retry hit".into()),
+                PlatformAttemptResult::Success("range hit".into()),
+            ])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let store = StubStore;
+        let cancel = NeverCancel;
+        let adapter = NoAdapters;
+        let mut options = CaptureOptions {
+            collect_trace: true,
+            ..CaptureOptions::default()
+        };
+        options.retry_policy.primary_accessibility =
+            vec![Duration::ZERO, Duration::from_millis(60)];
+        options.retry_policy.range_accessibility = vec![Duration::ZERO];
+        options.retry_policy.clipboard = vec![Duration::from_millis(120)];
+        options.interleave_method_retries = false;
+
+        let out = capture(&platform, &store, &cancel, &[&adapter], &options);
+        match out {
+            CaptureOutcome::Success(success) => {
+                assert_eq!(success.method, CaptureMethod::AccessibilityPrimary);
+                assert_eq!(success.text, "primary retry hit");
+                let trace = success.trace.expect("trace");
+                let started_methods: Vec<_> = trace
+                    .events
+                    .iter()
+                    .filter_map(|event| match event {
+                        TraceEvent::MethodStarted(method) => Some(*method),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    started_methods,
+                    vec![
+                        CaptureMethod::AccessibilityPrimary,
+                        CaptureMethod::AccessibilityPrimary
                     ]
                 );
             }
