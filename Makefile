@@ -1,6 +1,6 @@
 # Makefile for selection-capture
 
-.PHONY: help build test check fmt clippy clean docs run-examples release install-tools setup-release
+.PHONY: help build test check fmt clippy clean docs run-examples release install-tools setup-release windows-beta-smoke linux-alpha-smoke
 
 # Default target
 .DEFAULT_GOAL := help
@@ -13,6 +13,12 @@ build: ## Build the project
 
 test: ## Run tests
 	cargo test --verbose
+
+windows-beta-smoke: ## Run the Windows beta smoke tests
+	cargo test --features windows-beta --test windows_smoke --verbose
+
+linux-alpha-smoke: ## Run the Linux alpha smoke tests
+	cargo test --features linux-alpha --test linux_smoke --verbose
 
 check: ## Check code without building
 	cargo check --all-targets

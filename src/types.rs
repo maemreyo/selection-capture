@@ -212,6 +212,48 @@ pub fn default_method_order(allow_clipboard_borrow: bool) -> Vec<CaptureMethod> 
     methods
 }
 
+pub fn status_from_failure_kind(kind: FailureKind) -> CaptureStatus {
+    match kind {
+        FailureKind::PermissionDenied => CaptureStatus::PermissionDenied,
+        FailureKind::AppBlocked => CaptureStatus::AppBlocked,
+        FailureKind::EmptySelection => CaptureStatus::EmptySelection,
+        FailureKind::ClipboardAmbiguous => CaptureStatus::ClipboardBorrowAmbiguous,
+        FailureKind::TimedOut => CaptureStatus::TimedOut,
+        FailureKind::Cancelled => CaptureStatus::Cancelled,
+    }
+}
+
+pub fn update_for_method_result(
+    method: CaptureMethod,
+    result: &PlatformAttemptResult,
+) -> crate::profile::AppProfileUpdate {
+    let mut update = crate::profile::AppProfileUpdate::default();
+    if method.is_ax() {
+        update.ax_supported = match result {
+            PlatformAttemptResult::Success(_) => Some(TriState::Yes),
+            PlatformAttemptResult::PermissionDenied | PlatformAttemptResult::AppBlocked => {
+                Some(TriState::No)
+            }
+            _ => None,
+        };
+    }
+    if method.is_clipboard() {
+        update.clipboard_borrow_supported = match result {
+            PlatformAttemptResult::Success(_) => Some(TriState::Yes),
+            PlatformAttemptResult::PermissionDenied | PlatformAttemptResult::AppBlocked => {
+                Some(TriState::No)
+            }
+            _ => None,
+        };
+    }
+    if let PlatformAttemptResult::Success(_) = result {
+        update.last_success_method = Some(method);
+    } else if let Some(kind) = result.clone().failure_kind() {
+        update.last_failure_kind = Some(kind);
+    }
+    update
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,46 +307,4 @@ mod tests {
             &[Duration::from_millis(3)]
         );
     }
-}
-
-pub fn status_from_failure_kind(kind: FailureKind) -> CaptureStatus {
-    match kind {
-        FailureKind::PermissionDenied => CaptureStatus::PermissionDenied,
-        FailureKind::AppBlocked => CaptureStatus::AppBlocked,
-        FailureKind::EmptySelection => CaptureStatus::EmptySelection,
-        FailureKind::ClipboardAmbiguous => CaptureStatus::ClipboardBorrowAmbiguous,
-        FailureKind::TimedOut => CaptureStatus::TimedOut,
-        FailureKind::Cancelled => CaptureStatus::Cancelled,
-    }
-}
-
-pub fn update_for_method_result(
-    method: CaptureMethod,
-    result: &PlatformAttemptResult,
-) -> crate::profile::AppProfileUpdate {
-    let mut update = crate::profile::AppProfileUpdate::default();
-    if method.is_ax() {
-        update.ax_supported = match result {
-            PlatformAttemptResult::Success(_) => Some(TriState::Yes),
-            PlatformAttemptResult::PermissionDenied | PlatformAttemptResult::AppBlocked => {
-                Some(TriState::No)
-            }
-            _ => None,
-        };
-    }
-    if method.is_clipboard() {
-        update.clipboard_borrow_supported = match result {
-            PlatformAttemptResult::Success(_) => Some(TriState::Yes),
-            PlatformAttemptResult::PermissionDenied | PlatformAttemptResult::AppBlocked => {
-                Some(TriState::No)
-            }
-            _ => None,
-        };
-    }
-    if let PlatformAttemptResult::Success(_) = result {
-        update.last_success_method = Some(method);
-    } else if let Some(kind) = result.clone().failure_kind() {
-        update.last_failure_kind = Some(kind);
-    }
-    update
 }

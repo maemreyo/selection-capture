@@ -67,11 +67,7 @@ impl CapturePlatform for StubPlatform {
         self.app.clone()
     }
 
-    fn attempt(
-        &self,
-        _method: CaptureMethod,
-        _app: Option<&ActiveApp>,
-    ) -> PlatformAttemptResult {
+    fn attempt(&self, _method: CaptureMethod, _app: Option<&ActiveApp>) -> PlatformAttemptResult {
         let mut responses = self.responses.lock().unwrap();
         if responses.is_empty() {
             PlatformAttemptResult::Unavailable
