@@ -14,6 +14,7 @@ with explicit capture status and trace metadata for app-level UX decisions.
 ## Features
 
 - ✅ **Synchronous API** - Simple, blocking calls that are easy to integrate
+- ✅ **Optional Async API** - Feature-gated `capture_async(...)` for Tokio-based applications
 - 🔄 **Retry Logic** - Automatic retry with configurable budgets and delays
 - ⚡ **Multiple Strategies** - Falls back through different capture methods automatically
 - 🎯 **App-Specific Profiles** - Customize behavior per application
@@ -48,6 +49,13 @@ Enable the Windows beta scaffold explicitly:
 ```toml
 [dependencies]
 selection-capture = { version = "0.1", features = ["windows-beta"] }
+```
+
+Enable the optional async wrapper explicitly:
+
+```toml
+[dependencies]
+selection-capture = { version = "0.1", features = ["async"] }
 ```
 
 ## Quick Start (macOS)
@@ -89,6 +97,7 @@ fn main() {
 ### Main Function
 
 - `capture(...)` → `CaptureOutcome` - The primary capture function
+- `capture_async(...).await` → `CaptureOutcome` - Optional Tokio-backed wrapper behind the `async` feature
 
 ### Configuration
 
@@ -176,6 +185,10 @@ cargo test
 # Run the Windows beta smoke path on any host
 cargo test --features windows-beta --lib
 cargo test --features windows-beta --test windows_smoke
+
+# Run the async wrapper tests
+cargo test --features async --lib
+cargo test --features async --test async_capture
 
 # Check formatting
 cargo fmt --check

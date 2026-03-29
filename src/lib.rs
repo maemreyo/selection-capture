@@ -1,3 +1,5 @@
+#[cfg(feature = "async")]
+mod async_api;
 mod engine;
 #[cfg(feature = "linux-alpha")]
 mod linux;
@@ -10,6 +12,8 @@ mod types;
 #[cfg(feature = "windows-beta")]
 mod windows;
 
+#[cfg(feature = "async")]
+pub use async_api::capture_async;
 pub use engine::capture;
 #[cfg(feature = "linux-alpha")]
 pub use linux::LinuxPlatform;
