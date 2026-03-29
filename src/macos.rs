@@ -4,12 +4,17 @@ use crate::traits::{CapturePlatform, MonitorPlatform};
 use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
 #[cfg(target_os = "macos")]
 use crate::AxObserverBridge;
-use accessibility_ng::{AXAttribute, AXUIElement};
-use accessibility_sys_ng::{kAXFocusedUIElementAttribute, kAXSelectedTextAttribute};
+use accessibility_ng::{AXAttribute, AXObserver, AXUIElement};
+use accessibility_sys_ng::{
+    kAXFocusedUIElementAttribute, kAXFocusedUIElementChangedNotification, kAXSelectedTextAttribute,
+    kAXSelectedTextChangedNotification, pid_t, AXObserverRef, AXUIElementRef,
+};
 use active_win_pos_rs::get_active_window;
+use core_foundation::runloop::{kCFRunLoopDefaultMode, CFRunLoop};
 use core_foundation::string::CFString;
 use macos_accessibility_client::accessibility::application_is_trusted;
 use std::collections::VecDeque;
+use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 #[cfg(test)]
@@ -30,7 +35,15 @@ pub struct MacOSSelectionMonitor {
     backend: MacOSMonitorBackend,
     native_observer_active: bool,
     native_observer_attached: bool,
+    native_observer_runtime: Option<NativeObserverRuntime>,
     native_event_pump: Option<MacOSNativeEventPump>,
+}
+
+struct NativeObserverRuntime {
+    observer: AXObserver,
+    app_element: AXUIElement,
+    selected_text_registered: bool,
+    focused_element_registered: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,6 +195,11 @@ impl MacOSSelectionMonitor {
             backend: options.backend,
             native_observer_active,
             native_observer_attached: native_observer_active,
+            native_observer_runtime: if native_observer_active {
+                NativeObserverRuntime::try_new_for_active_app()
+            } else {
+                None
+            },
             native_event_pump,
         }
     }
@@ -256,6 +274,9 @@ impl MacOSSelectionMonitor {
     }
 
     pub fn poll_native_event_pump_once(&self) -> usize {
+        if let Some(runtime) = self.native_observer_runtime.as_ref() {
+            runtime.poll_once();
+        }
         let Some(pump) = self.native_event_pump else {
             return 0;
         };
@@ -352,6 +373,78 @@ fn try_enable_native_observer() -> bool {
     }
 
     AxObserverBridge::acquire()
+}
+
+unsafe extern "C" fn native_observer_callback(
+    _observer: AXObserverRef,
+    _element: AXUIElementRef,
+    _notification: core_foundation::string::CFStringRef,
+    _refcon: *mut c_void,
+) {
+    if let Ok(text) = get_selected_text_by_ax() {
+        let _ = AxObserverBridge::push_event(text);
+    }
+}
+
+impl NativeObserverRuntime {
+    fn try_new_for_active_app() -> Option<Self> {
+        let active_window = get_active_window().ok()?;
+        let pid = i32::try_from(active_window.process_id).ok()?;
+        let mut observer = AXObserver::new(pid as pid_t, native_observer_callback).ok()?;
+        let app_element = AXUIElement::application(pid as pid_t);
+
+        let mut selected_text_registered = false;
+        let mut focused_element_registered = false;
+
+        if observer
+            .add_notification(kAXSelectedTextChangedNotification, &app_element, 0usize)
+            .is_ok()
+        {
+            selected_text_registered = true;
+        }
+
+        if observer
+            .add_notification(kAXFocusedUIElementChangedNotification, &app_element, 0usize)
+            .is_ok()
+        {
+            focused_element_registered = true;
+        }
+
+        if !selected_text_registered && !focused_element_registered {
+            return None;
+        }
+
+        observer.start();
+
+        Some(Self {
+            observer,
+            app_element,
+            selected_text_registered,
+            focused_element_registered,
+        })
+    }
+
+    fn poll_once(&self) {
+        unsafe {
+            let _ = CFRunLoop::run_in_mode(kCFRunLoopDefaultMode, Duration::from_millis(0), true);
+        }
+    }
+}
+
+impl Drop for NativeObserverRuntime {
+    fn drop(&mut self) {
+        if self.selected_text_registered {
+            let _ = self
+                .observer
+                .remove_notification(kAXSelectedTextChangedNotification, &self.app_element);
+        }
+        if self.focused_element_registered {
+            let _ = self
+                .observer
+                .remove_notification(kAXFocusedUIElementChangedNotification, &self.app_element);
+        }
+        self.observer.stop();
+    }
 }
 
 #[cfg(test)]

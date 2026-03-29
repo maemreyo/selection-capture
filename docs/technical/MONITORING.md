@@ -25,6 +25,9 @@ What exists today:
 - Native bridge lifecycle now uses acquire/release semantics so multiple monitor instances can
   coexist without tearing down each other; bridge usage is released automatically when a monitor
   is dropped.
+- In native-preferred mode, monitor setup now attempts to register AX notifications
+  (`AXSelectedTextChanged`, `AXFocusedUIElementChanged`) on the active app and pumps the runloop
+  briefly per polling tick to ingest callback-driven updates into the same bounded queue path.
 - `WindowsSelectionMonitor` (`windows-beta`) provides a Windows polling backend with
   de-duplication using UI Automation/Legacy IAccessible selection reads.
 - `LinuxSelectionMonitor` (`linux-alpha`) provides a Linux polling backend with de-duplication
@@ -136,8 +139,8 @@ adaptation, or cancellation. That work is intentionally deferred until native ho
 - There is no timestamp, source app, or method metadata
 - The wrapper does not own background tasks or event subscriptions
 - The API does not distinguish "no event yet" from "monitor exhausted"
-- macOS native-preferred mode can ingest bridge-fed callback payloads, but full OS-level
-  `AXObserver` runloop lifecycle wiring is still pending
+- macOS native-preferred mode now includes minimal AXObserver notification wiring for the active
+  app; broader observer lifecycle (e.g. app focus migration/re-registration) is still pending
 - Coalescing mode intentionally drops events inside the emit interval window
 - Guarded mode intentionally suppresses events based on configured duplicate/interval policy
 - `stable_polls_required` drops transient/flicker updates until the same value is observed enough polls
