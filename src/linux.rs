@@ -17,7 +17,25 @@ struct DefaultLinuxBackend;
 
 impl LinuxBackend for DefaultLinuxBackend {
     fn attempt_atspi(&self) -> PlatformAttemptResult {
-        PlatformAttemptResult::Unavailable
+        #[cfg(target_os = "linux")]
+        {
+            match read_atspi_text() {
+                Ok(Some(text)) => {
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        PlatformAttemptResult::EmptySelection
+                    } else {
+                        PlatformAttemptResult::Success(trimmed.to_string())
+                    }
+                }
+                Ok(None) => PlatformAttemptResult::EmptySelection,
+                Err(_) => PlatformAttemptResult::Unavailable,
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            PlatformAttemptResult::Unavailable
+        }
     }
 
     fn attempt_x11_selection(&self) -> PlatformAttemptResult {
@@ -177,6 +195,160 @@ fn normalize_linux_text_stdout(stdout: &str) -> Option<String> {
     } else {
         Some(normalized.to_string())
     }
+}
+
+#[cfg(target_os = "linux")]
+fn read_atspi_text() -> Result<Option<String>, String> {
+    let script = r#"
+import re
+import subprocess
+import sys
+
+def call(cmd):
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout).strip())
+    return proc.stdout.strip()
+
+def parse_address(output):
+    match = re.search(r"'([^']+)'", output)
+    return match.group(1) if match else None
+
+def parse_reference(output):
+    match = re.search(r"\('([^']+)'\s*,\s*objectpath\s*'([^']+)'\)", output)
+    if not match:
+        match = re.search(r"\('([^']+)'\s*,\s*'([^']+)'\)", output)
+    if not match:
+        return None, None
+    return match.group(1), match.group(2)
+
+def parse_int(output):
+    match = re.search(r"(-?\d+)", output)
+    return int(match.group(1)) if match else None
+
+def parse_text(output):
+    match = re.search(r"\('((?:\\'|[^'])*)',\)", output)
+    if not match:
+        return None
+    return match.group(1).replace("\\\\", "\\").replace("\\'", "'")
+
+try:
+    addr_out = call([
+        "gdbus", "call",
+        "--session",
+        "--dest", "org.a11y.Bus",
+        "--object-path", "/org/a11y/bus",
+        "--method", "org.a11y.Bus.GetAddress",
+    ])
+    address = parse_address(addr_out)
+    if not address:
+        print("")
+        sys.exit(0)
+
+    active_out = call([
+        "gdbus", "call",
+        "--address", address,
+        "--dest", "org.a11y.atspi.Registry",
+        "--object-path", "/org/a11y/atspi/accessible/root",
+        "--method", "org.a11y.atspi.Collection.GetActiveDescendant",
+    ])
+    bus, path = parse_reference(active_out)
+    if not bus or not path or path == "/org/a11y/atspi/null":
+        print("")
+        sys.exit(0)
+
+    nsel = 0
+    try:
+        nsel_out = call([
+            "gdbus", "call",
+            "--address", address,
+            "--dest", bus,
+            "--object-path", path,
+            "--method", "org.a11y.atspi.Text.GetNSelections",
+        ])
+        nsel = parse_int(nsel_out) or 0
+    except Exception:
+        nsel = 0
+
+    if nsel > 0:
+        selection_out = call([
+            "gdbus", "call",
+            "--address", address,
+            "--dest", bus,
+            "--object-path", path,
+            "--method", "org.a11y.atspi.Text.GetSelection",
+            "0",
+        ])
+        bounds = re.findall(r"(-?\d+)", selection_out)
+        if len(bounds) >= 2:
+            start = int(bounds[0])
+            end = int(bounds[1])
+            if end > start:
+                selected_out = call([
+                    "gdbus", "call",
+                    "--address", address,
+                    "--dest", bus,
+                    "--object-path", path,
+                    "--method", "org.a11y.atspi.Text.GetText",
+                    str(start),
+                    str(end),
+                ])
+                selected_text = parse_text(selected_out)
+                if selected_text and selected_text.strip():
+                    print(selected_text)
+                    sys.exit(0)
+
+    try:
+        all_text_out = call([
+            "gdbus", "call",
+            "--address", address,
+            "--dest", bus,
+            "--object-path", path,
+            "--method", "org.a11y.atspi.Text.GetText",
+            "0",
+            "-1",
+        ])
+        all_text = parse_text(all_text_out)
+        if all_text and all_text.strip():
+            print(all_text)
+            sys.exit(0)
+    except Exception:
+        pass
+
+    try:
+        name_out = call([
+            "gdbus", "call",
+            "--address", address,
+            "--dest", bus,
+            "--object-path", path,
+            "--method", "org.freedesktop.DBus.Properties.Get",
+            "org.a11y.atspi.Accessible",
+            "Name",
+        ])
+        name = parse_text(name_out)
+        if name and name.strip():
+            print(name)
+            sys.exit(0)
+    except Exception:
+        pass
+
+    print("")
+except Exception as err:
+    sys.stderr.write(str(err))
+    sys.exit(1)
+"#;
+
+    let output = Command::new("python3")
+        .args(["-c", script])
+        .output()
+        .map_err(|err| err.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+    Ok(normalize_linux_text_stdout(&stdout))
 }
 
 #[cfg(target_os = "linux")]

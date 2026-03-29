@@ -15,12 +15,12 @@ What exists today:
   - Wayland: `wl-paste`
   - X11: `xclip` / `xsel`
 - Active app detection is available through `xdotool` (active window PID) plus `ps`/`readlink`.
-- AT-SPI path is still scaffolded and returns `PlatformAttemptResult::Unavailable`.
+- AT-SPI primary path attempts focused-descendant text reads over the accessibility bus
+  (`org.a11y.Bus` + `org.a11y.atspi.*` via `gdbus`).
 - Dispatch behavior and engine-level fallback behavior are covered by unit and smoke tests.
 
 What does not exist yet:
 
-- Real AT-SPI capture
 - Real clipboard-backed synthetic copy flow
 
 ## Setup
@@ -64,9 +64,10 @@ Current `CaptureMethod` mapping in `LinuxPlatform`:
 
 - Clipboard/primary-selection capture depends on host tools (`wl-paste`, `xclip`, `xsel`) being
   installed and reachable in `PATH`.
+- AT-SPI capture depends on `python3` and `gdbus`, and only works when the focused object exposes
+  usable `Text`/`Accessible` data on the a11y bus.
 - Active app detection depends on `xdotool`, `ps`, and `/proc` (`readlink`) and may fail on
   restricted Wayland sessions or minimal desktop environments.
-- `AccessibilityPrimary` (AT-SPI) still returns `Unavailable`.
 - `AccessibilityRange` is mapped to primary-selection reads and may be unavailable on restricted
   Wayland/X11 sessions.
 - `SyntheticCopy` does not yet synthesize key input; it shares the clipboard dispatch slot.
