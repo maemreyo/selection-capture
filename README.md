@@ -123,7 +123,7 @@ fn main() {
 ```rust
 use selection_capture::{
     CancelSignal, CaptureMetrics, CaptureMonitor, MacOSMonitorBackend, MacOSSelectionMonitor,
-    MacOSSelectionMonitorOptions, MonitorPlatform, MonitorSpamGuard,
+    MacOSNativeEventSource, MacOSSelectionMonitorOptions, MonitorPlatform, MonitorSpamGuard,
 };
 
 struct StubMonitor;
@@ -151,6 +151,10 @@ let _native_pref = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitor
     native_queue_capacity: 256,
 });
 let _ = _native_pref.enqueue_native_selection_event("hello from observer");
+let _ = _native_pref.ingest_native_observer_payload(
+    MacOSNativeEventSource::AXObserverSelectionChanged,
+    "hello from axobserver callback",
+);
 let cancel = StopImmediately;
 let _processed = mac_monitor.poll_until_cancelled(
     std::time::Duration::from_millis(120),

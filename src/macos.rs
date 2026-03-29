@@ -26,6 +26,13 @@ pub struct MacOSSelectionMonitor {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MacOSNativeEventSource {
+    AXObserverSelectionChanged,
+    AXObserverFocusedElementChanged,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MacOSMonitorBackend {
     Polling,
     NativeObserverPreferred,
@@ -188,6 +195,14 @@ impl MacOSSelectionMonitor {
             return true;
         }
         false
+    }
+
+    pub fn ingest_native_observer_payload(
+        &self,
+        _source: MacOSNativeEventSource,
+        payload: &str,
+    ) -> bool {
+        self.enqueue_native_selection_event(payload)
     }
 
     pub fn enqueue_native_selection_events<I, T>(&self, events: I) -> usize
@@ -543,5 +558,33 @@ mod tests {
         assert_eq!(accepted, 3);
         assert_eq!(monitor.native_queue_depth(), 3);
         assert_eq!(monitor.native_events_dropped(), 0);
+    }
+
+    #[test]
+    fn selection_monitor_native_observer_payload_uses_same_backpressure_path() {
+        let mut monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(50),
+            backend: MacOSMonitorBackend::NativeObserverPreferred,
+            native_queue_capacity: 2,
+        });
+        monitor.native_observer_active = true;
+
+        assert!(monitor.ingest_native_observer_payload(
+            MacOSNativeEventSource::AXObserverSelectionChanged,
+            "first"
+        ));
+        assert!(monitor.ingest_native_observer_payload(
+            MacOSNativeEventSource::AXObserverSelectionChanged,
+            "second"
+        ));
+        assert!(monitor.ingest_native_observer_payload(
+            MacOSNativeEventSource::AXObserverSelectionChanged,
+            "third"
+        ));
+
+        assert_eq!(monitor.native_events_dropped(), 1);
+        assert_eq!(monitor.next_selection_text(), Some("second".to_string()));
+        assert_eq!(monitor.next_selection_text(), Some("third".to_string()));
+        assert_eq!(monitor.next_selection_text(), None);
     }
 }
