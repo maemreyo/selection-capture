@@ -12,7 +12,17 @@ homepage = "https://github.com/maemreyo/selection-capture"
 documentation = "https://docs.rs/selection-capture"
 keywords = ["selection", "macos", "accessibility", "clipboard", "capture"]
 categories = ["api-bindings", "os::macos-apis"]
-include = ["src/**", "Cargo.toml", "README.md", "LICENSE*", "SPEC.md"]
+include = [
+    "src/**",
+    "tests/**",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE*",
+    "docs/technical/SPEC.md",
+    "docs/technical/WINDOWS.md",
+    "docs/technical/LINUX.md",
+    "docs/technical/MONITORING.md",
+]
 
 [lib]
 name = "selection_capture"

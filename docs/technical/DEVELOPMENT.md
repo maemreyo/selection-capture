@@ -278,10 +278,10 @@ Before releasing a new version:
 
 - Open an issue on GitHub for bugs or questions
 - Check existing issues and PRs
-- Read the SPEC.md for design rationale
+- Read [SPEC.md](SPEC.md) for design rationale
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+See [CONTRIBUTING.md](../contributing/CONTRIBUTING.md) for contribution guidelines.
 
 Thank you for contributing to `selection-capture`! 🚀

@@ -79,7 +79,7 @@ impl CancelSignal for NeverCancel {
 
 struct NoopStore;
 impl AppProfileStore for NoopStore {
-    fn load(&self, _app: &ActiveApp) -> AppProfile { AppProfile::default() }
+    fn load(&self, app: &ActiveApp) -> AppProfile { AppProfile::unknown(app.bundle_id.clone()) }
     fn merge_update(&self, _app: &ActiveApp, _update: AppProfileUpdate) {}
 }
 
@@ -146,10 +146,19 @@ Current limitations:
 ### Example with Custom Options
 
 ```rust
+use selection_capture::{CaptureOptions, RetryPolicy};
+use std::time::Duration;
+
 let options = CaptureOptions {
-    max_retries: 3,
-    retry_delay_ms: 100,
+    retry_policy: RetryPolicy {
+        primary_accessibility: vec![Duration::from_millis(0), Duration::from_millis(80)],
+        range_accessibility: vec![Duration::from_millis(0)],
+        clipboard: vec![Duration::from_millis(120)],
+        poll_interval: Duration::from_millis(20),
+    },
     collect_trace: true,
+    allow_clipboard_borrow: true,
+    overall_timeout: Duration::from_millis(500),
     strategy_override: None,
 };
 ```
@@ -191,7 +200,7 @@ Each strategy is attempted in order, with automatic retry and detailed tracing.
 
 ## Contributing
 
-Contributions are welcome! Please see our [Contributing Guide](CONTRIBUTING.md) for details on:
+Contributions are welcome! Please see our [Contributing Guide](docs/contributing/CONTRIBUTING.md) for details on:
 
 - Reporting bugs
 - Suggesting features
@@ -229,7 +238,7 @@ cargo clippy --all-targets
 ## Documentation
 
 - [API Documentation](https://docs.rs/selection-capture)
-- [Specification](SPEC.md)
+- [Specification](docs/technical/SPEC.md)
 - [Changelog](CHANGELOG.md)
 - [Windows Beta Notes](docs/technical/WINDOWS.md)
 - [Monitoring Notes](docs/technical/MONITORING.md)
