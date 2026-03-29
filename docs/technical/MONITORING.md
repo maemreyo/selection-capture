@@ -17,6 +17,9 @@ What exists today:
   queue (tail de-dup + drop counter) with safe fallback to polling, plus callback ingress API
   (`ingest_native_observer_payload(...)`) and an optional native pump hook
   (`native_event_pump`) for future AXObserver wiring.
+- `AxObserverBridge` (macOS-only scaffold) provides a process-local bridge with active-state
+  gating, bounded queueing, tail de-duplication, and drop metrics; monitor integration can use
+  `ax_observer_drain_events_for_monitor()` as the `native_event_pump` callback.
 - `WindowsSelectionMonitor` (`windows-beta`) provides a Windows polling backend with
   de-duplication using UI Automation/Legacy IAccessible selection reads.
 - `LinuxSelectionMonitor` (`linux-alpha`) provides a Linux polling backend with de-duplication

@@ -1,5 +1,7 @@
 #[cfg(feature = "async")]
 mod async_api;
+#[cfg(target_os = "macos")]
+mod ax_observer;
 mod cache;
 mod engine;
 #[cfg(feature = "linux-alpha")]
@@ -16,6 +18,10 @@ mod windows;
 
 #[cfg(feature = "async")]
 pub use async_api::capture_async;
+#[cfg(target_os = "macos")]
+pub use ax_observer::{
+    drain_events_for_monitor as ax_observer_drain_events_for_monitor, AxObserverBridge,
+};
 pub use engine::{capture, try_capture};
 #[cfg(feature = "linux-alpha")]
 pub use linux::{LinuxPlatform, LinuxSelectionMonitor};
