@@ -18,7 +18,7 @@ use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 #[cfg(test)]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -35,11 +35,14 @@ pub struct MacOSSelectionMonitor {
     backend: MacOSMonitorBackend,
     native_observer_active: bool,
     native_observer_attached: bool,
-    native_observer_runtime: Option<NativeObserverRuntime>,
+    native_observer_runtime: Mutex<Option<NativeObserverRuntime>>,
+    native_observer_last_runtime_pid: Mutex<Option<u64>>,
+    active_pid_provider: Option<MacOSActivePidProvider>,
     native_event_pump: Option<MacOSNativeEventPump>,
 }
 
 struct NativeObserverRuntime {
+    pid: u64,
     observer: AXObserver,
     app_element: AXUIElement,
     selected_text_registered: bool,
@@ -65,9 +68,11 @@ pub struct MacOSSelectionMonitorOptions {
     pub backend: MacOSMonitorBackend,
     pub native_queue_capacity: usize,
     pub native_event_pump: Option<MacOSNativeEventPump>,
+    pub active_pid_provider: Option<MacOSActivePidProvider>,
 }
 
 pub type MacOSNativeEventPump = fn() -> Vec<String>;
+pub type MacOSActivePidProvider = fn() -> Option<u64>;
 
 impl Default for MacOSPlatform {
     fn default() -> Self {
@@ -88,6 +93,7 @@ impl Default for MacOSSelectionMonitorOptions {
             backend: MacOSMonitorBackend::Polling,
             native_queue_capacity: 256,
             native_event_pump: None,
+            active_pid_provider: None,
         }
     }
 }
@@ -170,6 +176,7 @@ impl MacOSSelectionMonitor {
             backend: MacOSMonitorBackend::Polling,
             native_queue_capacity: 256,
             native_event_pump: None,
+            active_pid_provider: None,
         })
     }
 
@@ -186,6 +193,18 @@ impl MacOSSelectionMonitor {
             options.native_event_pump
         };
 
+        let initial_active_pid = if native_observer_active {
+            current_active_pid(options.active_pid_provider)
+        } else {
+            None
+        };
+        let initial_runtime = initial_active_pid.and_then(NativeObserverRuntime::try_new_for_pid);
+        let initial_last_runtime_pid = if initial_runtime.is_some() {
+            initial_runtime.as_ref().map(|runtime| runtime.pid)
+        } else {
+            initial_active_pid
+        };
+
         Self {
             last_emitted: Mutex::new(None),
             native_event_queue: Mutex::new(VecDeque::new()),
@@ -195,11 +214,9 @@ impl MacOSSelectionMonitor {
             backend: options.backend,
             native_observer_active,
             native_observer_attached: native_observer_active,
-            native_observer_runtime: if native_observer_active {
-                NativeObserverRuntime::try_new_for_active_app()
-            } else {
-                None
-            },
+            native_observer_runtime: Mutex::new(initial_runtime),
+            native_observer_last_runtime_pid: Mutex::new(initial_last_runtime_pid),
+            active_pid_provider: options.active_pid_provider,
             native_event_pump,
         }
     }
@@ -274,14 +291,51 @@ impl MacOSSelectionMonitor {
     }
 
     pub fn poll_native_event_pump_once(&self) -> usize {
-        if let Some(runtime) = self.native_observer_runtime.as_ref() {
-            runtime.poll_once();
+        self.refresh_native_observer_runtime();
+        if let Ok(runtime) = self.native_observer_runtime.lock() {
+            if let Some(runtime) = runtime.as_ref() {
+                runtime.poll_once();
+            }
         }
         let Some(pump) = self.native_event_pump else {
             return 0;
         };
         let events = pump();
         self.enqueue_native_selection_events(events)
+    }
+
+    fn refresh_native_observer_runtime(&self) {
+        if !self.native_observer_active {
+            return;
+        }
+
+        let Some(active_pid) = current_active_pid(self.active_pid_provider) else {
+            return;
+        };
+
+        let Ok(mut runtime) = self.native_observer_runtime.lock() else {
+            return;
+        };
+        let Ok(mut last_runtime_pid) = self.native_observer_last_runtime_pid.lock() else {
+            return;
+        };
+
+        if runtime
+            .as_ref()
+            .map(|existing| existing.pid == active_pid)
+            .unwrap_or(false)
+        {
+            *last_runtime_pid = Some(active_pid);
+            return;
+        }
+
+        if *last_runtime_pid == Some(active_pid) {
+            return;
+        }
+
+        *runtime = None;
+        *runtime = NativeObserverRuntime::try_new_for_pid(active_pid);
+        *last_runtime_pid = Some(active_pid);
     }
 
     fn next_selection_text(&self) -> Option<String> {
@@ -352,6 +406,12 @@ impl MonitorPlatform for MacOSSelectionMonitor {
 
 impl Drop for MacOSSelectionMonitor {
     fn drop(&mut self) {
+        if let Ok(mut runtime) = self.native_observer_runtime.lock() {
+            *runtime = None;
+        }
+        if let Ok(mut last_runtime_pid) = self.native_observer_last_runtime_pid.lock() {
+            *last_runtime_pid = None;
+        }
         if self.native_observer_attached {
             let _ = AxObserverBridge::release();
         }
@@ -387,9 +447,14 @@ unsafe extern "C" fn native_observer_callback(
 }
 
 impl NativeObserverRuntime {
-    fn try_new_for_active_app() -> Option<Self> {
-        let active_window = get_active_window().ok()?;
-        let pid = i32::try_from(active_window.process_id).ok()?;
+    fn try_new_for_pid(pid: u64) -> Option<Self> {
+        #[cfg(test)]
+        {
+            NATIVE_RUNTIME_INIT_PID.store(pid, Ordering::SeqCst);
+            NATIVE_RUNTIME_INIT_COUNT.fetch_add(1, Ordering::SeqCst);
+        }
+
+        let pid = i32::try_from(pid).ok()?;
         let mut observer = AXObserver::new(pid as pid_t, native_observer_callback).ok()?;
         let app_element = AXUIElement::application(pid as pid_t);
 
@@ -417,6 +482,7 @@ impl NativeObserverRuntime {
         observer.start();
 
         Some(Self {
+            pid: pid as u64,
             observer,
             app_element,
             selected_text_registered,
@@ -429,6 +495,13 @@ impl NativeObserverRuntime {
             let _ = CFRunLoop::run_in_mode(kCFRunLoopDefaultMode, Duration::from_millis(0), true);
         }
     }
+}
+
+fn current_active_pid(provider: Option<MacOSActivePidProvider>) -> Option<u64> {
+    if let Some(provider) = provider {
+        return provider();
+    }
+    get_active_window().ok().map(|window| window.process_id)
 }
 
 impl Drop for NativeObserverRuntime {
@@ -451,6 +524,10 @@ impl Drop for NativeObserverRuntime {
 static FORCED_NATIVE_OBSERVER_ACTIVATION: AtomicBool = AtomicBool::new(false);
 #[cfg(test)]
 static FORCED_NATIVE_OBSERVER_ACTIVATION_SET: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static NATIVE_RUNTIME_INIT_PID: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+static NATIVE_RUNTIME_INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(test)]
 fn force_native_observer_activation(value: Option<bool>) {
@@ -644,6 +721,11 @@ mod tests {
         BATCHES.get_or_init(|| Mutex::new(VecDeque::new()))
     }
 
+    fn active_pid_batches() -> &'static Mutex<VecDeque<Option<u64>>> {
+        static BATCHES: OnceLock<Mutex<VecDeque<Option<u64>>>> = OnceLock::new();
+        BATCHES.get_or_init(|| Mutex::new(VecDeque::new()))
+    }
+
     fn monitor_test_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
@@ -653,10 +735,19 @@ mod tests {
         force_native_observer_activation(Some(false));
         let _ = AxObserverBridge::stop();
         let _ = AxObserverBridge::drain_events(usize::MAX);
+        if let Ok(mut pids) = active_pid_batches().lock() {
+            pids.clear();
+        }
+        NATIVE_RUNTIME_INIT_PID.store(0, Ordering::SeqCst);
+        NATIVE_RUNTIME_INIT_COUNT.store(0, Ordering::SeqCst);
     }
 
     fn push_native_pump_batch(batch: Vec<String>) {
         native_pump_batches().lock().unwrap().push_back(batch);
+    }
+
+    fn push_active_pid_batch(batch: Option<u64>) {
+        active_pid_batches().lock().unwrap().push_back(batch);
     }
 
     fn test_native_event_pump() -> Vec<String> {
@@ -665,6 +756,10 @@ mod tests {
             .unwrap()
             .pop_front()
             .unwrap_or_default()
+    }
+
+    fn test_active_pid_provider() -> Option<u64> {
+        active_pid_batches().lock().unwrap().pop_front().flatten()
     }
 
     #[test]
@@ -704,6 +799,7 @@ mod tests {
             backend: MacOSMonitorBackend::NativeObserverPreferred,
             native_queue_capacity: 256,
             native_event_pump: None,
+            active_pid_provider: None,
         });
 
         assert_eq!(monitor.poll_interval, Duration::from_millis(75));
@@ -737,6 +833,7 @@ mod tests {
             backend: MacOSMonitorBackend::NativeObserverPreferred,
             native_queue_capacity: 256,
             native_event_pump: None,
+            active_pid_provider: None,
         });
         monitor.native_observer_active = true;
         monitor.native_observer_attached = false;
@@ -761,6 +858,7 @@ mod tests {
             backend: MacOSMonitorBackend::Polling,
             native_queue_capacity: 2,
             native_event_pump: None,
+            active_pid_provider: None,
         });
 
         assert!(monitor.enqueue_native_selection_event("a"));
@@ -782,6 +880,7 @@ mod tests {
             backend: MacOSMonitorBackend::Polling,
             native_queue_capacity: 4,
             native_event_pump: None,
+            active_pid_provider: None,
         });
 
         let accepted =
@@ -803,6 +902,7 @@ mod tests {
             backend: MacOSMonitorBackend::NativeObserverPreferred,
             native_queue_capacity: 2,
             native_event_pump: None,
+            active_pid_provider: None,
         });
         monitor.native_observer_active = true;
         monitor.native_observer_attached = false;
@@ -840,6 +940,7 @@ mod tests {
             backend: MacOSMonitorBackend::NativeObserverPreferred,
             native_queue_capacity: 3,
             native_event_pump: Some(test_native_event_pump),
+            active_pid_provider: None,
         });
         monitor.native_observer_active = true;
         monitor.native_observer_attached = false;
@@ -866,6 +967,7 @@ mod tests {
             backend: MacOSMonitorBackend::NativeObserverPreferred,
             native_queue_capacity: 4,
             native_event_pump: None,
+            active_pid_provider: None,
         });
 
         assert!(monitor.native_observer_active());
@@ -891,11 +993,43 @@ mod tests {
                 backend: MacOSMonitorBackend::NativeObserverPreferred,
                 native_queue_capacity: 4,
                 native_event_pump: None,
+                active_pid_provider: None,
             });
             assert!(monitor.native_observer_active());
             assert!(AxObserverBridge::is_active());
         }
 
         assert!(!AxObserverBridge::is_active());
+    }
+
+    #[test]
+    fn selection_monitor_native_runtime_rebuilds_on_focus_pid_change() {
+        let _guard = monitor_test_lock()
+            .lock()
+            .expect("monitor test lock poisoned");
+        reset_native_observer_state_for_tests();
+        force_native_observer_activation(Some(true));
+        push_active_pid_batch(Some(111));
+        push_active_pid_batch(Some(222));
+        push_active_pid_batch(Some(222));
+
+        let monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(75),
+            backend: MacOSMonitorBackend::NativeObserverPreferred,
+            native_queue_capacity: 4,
+            native_event_pump: None,
+            active_pid_provider: Some(test_active_pid_provider),
+        });
+
+        assert_eq!(NATIVE_RUNTIME_INIT_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(NATIVE_RUNTIME_INIT_PID.load(Ordering::SeqCst), 111);
+
+        let _ = monitor.poll_native_event_pump_once();
+        assert_eq!(NATIVE_RUNTIME_INIT_COUNT.load(Ordering::SeqCst), 2);
+        assert_eq!(NATIVE_RUNTIME_INIT_PID.load(Ordering::SeqCst), 222);
+
+        let _ = monitor.poll_native_event_pump_once();
+        assert_eq!(NATIVE_RUNTIME_INIT_COUNT.load(Ordering::SeqCst), 2);
+        assert_eq!(NATIVE_RUNTIME_INIT_PID.load(Ordering::SeqCst), 222);
     }
 }

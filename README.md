@@ -150,6 +150,7 @@ let _native_pref = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitor
     backend: MacOSMonitorBackend::NativeObserverPreferred,
     native_queue_capacity: 256,
     native_event_pump: None, // defaults to AxObserverBridge drain pump when native observer activates
+    active_pid_provider: None, // optional test/integration hook; defaults to active window PID
 });
 let _ = _native_pref.enqueue_native_selection_event("hello from observer");
 let _ = _native_pref.ingest_native_observer_payload(
