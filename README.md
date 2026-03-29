@@ -15,6 +15,7 @@ with explicit capture status and trace metadata for app-level UX decisions.
 
 - ✅ **Synchronous API** - Simple, blocking calls that are easy to integrate
 - ✅ **Optional Async API** - Feature-gated `capture_async(...)` for Tokio-based applications
+- ✅ **Optional Rich Content API** - Feature-gated `capture_rich(...)` / `try_capture_rich(...)` with clipboard HTML/RTF enrichment
 - 🧪 **Experimental Monitoring Scaffold** - Backend-agnostic monitoring API surface for future selection change streams
 - 🔄 **Retry Logic** - Automatic retry with configurable budgets and delays
 - ⚡ **Multiple Strategies** - Falls back through different capture methods automatically
@@ -67,6 +68,13 @@ Enable the optional async wrapper explicitly:
 selection-capture = { version = "0.1", features = ["async"] }
 ```
 
+Enable rich-content capture explicitly:
+
+```toml
+[dependencies]
+selection-capture = { version = "0.1", features = ["rich-content"] }
+```
+
 ## Quick Start (macOS)
 
 ```rust
@@ -108,6 +116,8 @@ fn main() {
 - `capture(...)` → `CaptureOutcome` - The primary capture function
 - `try_capture(...)` → `Result<CaptureOutcome, WouldBlock>` - Non-blocking single-pass variant
 - `capture_async(...).await` → `CaptureOutcome` - Optional Tokio-backed wrapper behind the `async` feature
+- `capture_rich(...)` → `CaptureRichOutcome` - Optional rich-content capture behind `rich-content`
+- `try_capture_rich(...)` → `Result<CaptureRichOutcome, WouldBlock>` - Non-blocking rich variant behind `rich-content`
 
 ### Configuration
 
@@ -200,9 +210,32 @@ Current limitations:
 ### Return Types
 
 - `CaptureOutcome::{Success, Failure}` - Result of capture attempt
+- `CaptureRichOutcome::{Success, Failure}` - Rich result with plain fallback semantics
 - `CaptureStatus` - Detailed status codes for deterministic UX mapping
 - `FailureKind` - Categorization of failure modes
 - `CaptureTrace` - Complete trace of all attempts made
+
+### Rich Content Capture (`rich-content` feature)
+
+`capture_rich(...)` preserves backward compatibility by keeping the plain capture engine as baseline,
+then optionally attaching clipboard rich payloads.
+
+- Rich payload sources (current): clipboard HTML/RTF
+- Guardrail: rich payload is accepted only when clipboard plain text matches captured plain text
+- Fallback: if guard fails (or payload unavailable/oversized), result degrades to plain content
+
+```rust
+#[cfg(feature = "rich-content")]
+{
+    use selection_capture::{capture_rich, CaptureRichOptions, CaptureRichOutcome};
+
+    let rich_options = CaptureRichOptions::default();
+    match capture_rich(&platform, &store, &cancel, &adapters, &rich_options) {
+        CaptureRichOutcome::Success(ok) => println!("Captured: {:?}", ok.content),
+        CaptureRichOutcome::Failure(err) => eprintln!("Capture failed: {:?}", err.status),
+    }
+}
+```
 
 ### Example with Custom Options
 
