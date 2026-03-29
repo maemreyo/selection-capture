@@ -1,3 +1,8 @@
+use crate::linux_observer::{
+    drain_events_for_monitor as linux_observer_drain_events_for_monitor, LinuxObserverBridge,
+};
+use crate::linux_runtime_adapter::install_default_linux_runtime_adapter_if_absent;
+use crate::linux_subscriber::ensure_linux_native_subscriber_hook_installed;
 use crate::traits::{CapturePlatform, MonitorPlatform};
 use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
 use std::collections::VecDeque;
@@ -18,6 +23,7 @@ pub struct LinuxSelectionMonitor {
     native_queue_capacity: usize,
     pub poll_interval: Duration,
     backend: LinuxMonitorBackend,
+    native_observer_attached: bool,
     native_event_pump: Option<LinuxNativeEventPump>,
 }
 
@@ -335,6 +341,21 @@ impl LinuxSelectionMonitor {
     }
 
     pub fn new_with_options(options: LinuxSelectionMonitorOptions) -> Self {
+        if matches!(options.backend, LinuxMonitorBackend::NativeEventPreferred) {
+            install_default_linux_runtime_adapter_if_absent();
+            ensure_linux_native_subscriber_hook_installed();
+        }
+        let native_observer_attached =
+            matches!(options.backend, LinuxMonitorBackend::NativeEventPreferred)
+                && LinuxObserverBridge::acquire();
+        let native_event_pump = if native_observer_attached {
+            options
+                .native_event_pump
+                .or(Some(linux_observer_drain_events_for_monitor))
+        } else {
+            options.native_event_pump
+        };
+
         Self {
             last_emitted: Mutex::new(None),
             native_event_queue: Mutex::new(VecDeque::new()),
@@ -342,7 +363,8 @@ impl LinuxSelectionMonitor {
             native_queue_capacity: options.native_queue_capacity.max(1),
             poll_interval: options.poll_interval,
             backend: options.backend,
-            native_event_pump: options.native_event_pump,
+            native_observer_attached,
+            native_event_pump,
         }
     }
 
@@ -481,6 +503,14 @@ impl CapturePlatform for LinuxPlatform {
 impl MonitorPlatform for LinuxSelectionMonitor {
     fn next_selection_change(&self) -> Option<String> {
         self.next_selection_text()
+    }
+}
+
+impl Drop for LinuxSelectionMonitor {
+    fn drop(&mut self) {
+        if self.native_observer_attached {
+            let _ = LinuxObserverBridge::release();
+        }
     }
 }
 
@@ -693,6 +723,17 @@ except Exception as err:
     Ok(normalize_linux_text_stdout(&stdout))
 }
 
+pub(crate) fn linux_default_runtime_event_source() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        return read_atspi_text().ok().flatten();
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn read_active_app() -> Result<Option<ActiveApp>, String> {
     let pid = read_active_window_pid()?;
@@ -770,6 +811,14 @@ fn read_process_exe_path(pid: u32) -> Result<Option<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::linux_subscriber::linux_native_subscriber_stats;
+    use crate::LinuxObserverBridge;
+    use std::sync::{Mutex, OnceLock};
+
+    fn test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[derive(Debug)]
     struct StubBackend {
@@ -821,6 +870,7 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_preferred_uses_event_pump_when_available() {
+        let _guard = test_lock().lock().expect("test lock poisoned");
         fn pump() -> Vec<String> {
             vec![
                 "  native a ".to_string(),
@@ -847,7 +897,76 @@ mod tests {
     }
 
     #[test]
+    fn selection_monitor_native_preferred_uses_bridge_drain_by_default() {
+        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _ = LinuxObserverBridge::stop();
+        let _ = LinuxObserverBridge::start();
+        assert!(LinuxObserverBridge::is_active());
+        assert!(LinuxObserverBridge::push_event("bridge one"));
+        assert!(LinuxObserverBridge::push_event("bridge two"));
+
+        let monitor = LinuxSelectionMonitor::new_with_options(LinuxSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(10),
+            backend: LinuxMonitorBackend::NativeEventPreferred,
+            native_queue_capacity: 8,
+            native_event_pump: None,
+        });
+
+        assert_eq!(
+            monitor.next_selection_change(),
+            Some("bridge one".to_string())
+        );
+        assert_eq!(
+            monitor.next_selection_change(),
+            Some("bridge two".to_string())
+        );
+        assert!(LinuxObserverBridge::is_active());
+        let _ = LinuxObserverBridge::stop();
+    }
+
+    #[test]
+    fn selection_monitor_native_preferred_releases_bridge_on_drop() {
+        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _ = LinuxObserverBridge::stop();
+
+        {
+            let _monitor = LinuxSelectionMonitor::new_with_options(LinuxSelectionMonitorOptions {
+                poll_interval: Duration::from_millis(10),
+                backend: LinuxMonitorBackend::NativeEventPreferred,
+                native_queue_capacity: 8,
+                native_event_pump: None,
+            });
+            assert!(LinuxObserverBridge::is_active());
+        }
+
+        assert!(!LinuxObserverBridge::is_active());
+    }
+
+    #[test]
+    fn selection_monitor_native_preferred_transitions_subscriber_manager_lifecycle() {
+        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _ = LinuxObserverBridge::stop();
+        let before = linux_native_subscriber_stats();
+
+        {
+            let _monitor = LinuxSelectionMonitor::new_with_options(LinuxSelectionMonitorOptions {
+                poll_interval: Duration::from_millis(10),
+                backend: LinuxMonitorBackend::NativeEventPreferred,
+                native_queue_capacity: 8,
+                native_event_pump: None,
+            });
+            let during = linux_native_subscriber_stats();
+            assert!(during.active);
+            assert_eq!(during.starts, before.starts + 1);
+        }
+
+        let after = linux_native_subscriber_stats();
+        assert!(after.stops > before.stops);
+    }
+
+    #[test]
     fn selection_monitor_native_preferred_applies_queue_capacity() {
+        let _guard = test_lock().lock().expect("test lock poisoned");
         let monitor = LinuxSelectionMonitor::new_with_options(LinuxSelectionMonitorOptions {
             poll_interval: Duration::from_millis(10),
             backend: LinuxMonitorBackend::NativeEventPreferred,

@@ -1,5 +1,10 @@
 use crate::traits::{CapturePlatform, MonitorPlatform};
 use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
+use crate::windows_observer::{
+    drain_events_for_monitor as windows_observer_drain_events_for_monitor, WindowsObserverBridge,
+};
+use crate::windows_runtime_adapter::install_default_windows_runtime_adapter_if_absent;
+use crate::windows_subscriber::ensure_windows_native_subscriber_hook_installed;
 use std::collections::VecDeque;
 #[cfg(target_os = "windows")]
 use std::process::Command;
@@ -16,6 +21,7 @@ pub struct WindowsSelectionMonitor {
     native_queue_capacity: usize,
     pub poll_interval: Duration,
     backend: WindowsMonitorBackend,
+    native_observer_attached: bool,
     native_event_pump: Option<WindowsNativeEventPump>,
 }
 
@@ -197,6 +203,21 @@ impl WindowsSelectionMonitor {
     }
 
     pub fn new_with_options(options: WindowsSelectionMonitorOptions) -> Self {
+        if matches!(options.backend, WindowsMonitorBackend::NativeEventPreferred) {
+            install_default_windows_runtime_adapter_if_absent();
+            ensure_windows_native_subscriber_hook_installed();
+        }
+        let native_observer_attached =
+            matches!(options.backend, WindowsMonitorBackend::NativeEventPreferred)
+                && WindowsObserverBridge::acquire();
+        let native_event_pump = if native_observer_attached {
+            options
+                .native_event_pump
+                .or(Some(windows_observer_drain_events_for_monitor))
+        } else {
+            options.native_event_pump
+        };
+
         Self {
             last_emitted: Mutex::new(None),
             native_event_queue: Mutex::new(VecDeque::new()),
@@ -204,7 +225,8 @@ impl WindowsSelectionMonitor {
             native_queue_capacity: options.native_queue_capacity.max(1),
             poll_interval: options.poll_interval,
             backend: options.backend,
-            native_event_pump: options.native_event_pump,
+            native_observer_attached,
+            native_event_pump,
         }
     }
 
@@ -346,6 +368,14 @@ impl MonitorPlatform for WindowsSelectionMonitor {
     }
 }
 
+impl Drop for WindowsSelectionMonitor {
+    fn drop(&mut self) {
+        if self.native_observer_attached {
+            let _ = WindowsObserverBridge::release();
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn read_clipboard_text() -> Result<Option<String>, String> {
     let output = Command::new("powershell")
@@ -416,6 +446,17 @@ if ($null -ne $valuePattern) {
 
     let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
     Ok(normalize_windows_text_stdout(&stdout))
+}
+
+pub(crate) fn windows_default_runtime_event_source() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        return read_uia_text().ok().flatten();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -601,6 +642,9 @@ fn parse_active_app_stdout(stdout: &str) -> Option<ActiveApp> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::windows_subscriber::windows_native_subscriber_stats;
+    use crate::WindowsObserverBridge;
+    use std::sync::{Mutex, OnceLock};
 
     #[derive(Debug)]
     struct StubBackend {
@@ -626,6 +670,11 @@ mod tests {
         fn attempt_synthetic_copy(&self) -> PlatformAttemptResult {
             self.synthetic_copy.clone()
         }
+    }
+
+    fn test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
     }
 
     #[test]
@@ -657,6 +706,7 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_preferred_uses_event_pump_when_available() {
+        let _guard = test_lock().lock().expect("test lock poisoned");
         fn pump() -> Vec<String> {
             vec![
                 "  native a ".to_string(),
@@ -683,7 +733,77 @@ mod tests {
     }
 
     #[test]
+    fn selection_monitor_native_preferred_uses_bridge_drain_by_default() {
+        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _ = WindowsObserverBridge::stop();
+        let _ = WindowsObserverBridge::start();
+        assert!(WindowsObserverBridge::push_event("bridge one"));
+        assert!(WindowsObserverBridge::push_event("bridge two"));
+
+        let monitor = WindowsSelectionMonitor::new_with_options(WindowsSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(10),
+            backend: WindowsMonitorBackend::NativeEventPreferred,
+            native_queue_capacity: 8,
+            native_event_pump: None,
+        });
+
+        assert_eq!(
+            monitor.next_selection_change(),
+            Some("bridge one".to_string())
+        );
+        assert_eq!(
+            monitor.next_selection_change(),
+            Some("bridge two".to_string())
+        );
+        assert!(WindowsObserverBridge::is_active());
+        let _ = WindowsObserverBridge::stop();
+    }
+
+    #[test]
+    fn selection_monitor_native_preferred_releases_bridge_on_drop() {
+        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _ = WindowsObserverBridge::stop();
+
+        {
+            let _monitor =
+                WindowsSelectionMonitor::new_with_options(WindowsSelectionMonitorOptions {
+                    poll_interval: Duration::from_millis(10),
+                    backend: WindowsMonitorBackend::NativeEventPreferred,
+                    native_queue_capacity: 8,
+                    native_event_pump: None,
+                });
+            assert!(WindowsObserverBridge::is_active());
+        }
+
+        assert!(!WindowsObserverBridge::is_active());
+    }
+
+    #[test]
+    fn selection_monitor_native_preferred_transitions_subscriber_manager_lifecycle() {
+        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _ = WindowsObserverBridge::stop();
+        let before = windows_native_subscriber_stats();
+
+        {
+            let _monitor =
+                WindowsSelectionMonitor::new_with_options(WindowsSelectionMonitorOptions {
+                    poll_interval: Duration::from_millis(10),
+                    backend: WindowsMonitorBackend::NativeEventPreferred,
+                    native_queue_capacity: 8,
+                    native_event_pump: None,
+                });
+            let during = windows_native_subscriber_stats();
+            assert!(during.active);
+            assert_eq!(during.starts, before.starts + 1);
+        }
+
+        let after = windows_native_subscriber_stats();
+        assert!(after.stops > before.stops);
+    }
+
+    #[test]
     fn selection_monitor_native_preferred_applies_queue_capacity() {
+        let _guard = test_lock().lock().expect("test lock poisoned");
         let monitor = WindowsSelectionMonitor::new_with_options(WindowsSelectionMonitorOptions {
             poll_interval: Duration::from_millis(10),
             backend: WindowsMonitorBackend::NativeEventPreferred,

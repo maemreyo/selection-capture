@@ -35,11 +35,46 @@ What exists today:
 - `WindowsSelectionMonitor` (`windows-beta`) provides a Windows polling backend with
   de-duplication using UI Automation/Legacy IAccessible selection reads, plus a
   native-event-preferred scaffold mode (`WindowsMonitorBackend::NativeEventPreferred`) with a
-  bounded native queue and optional event pump hook (`WindowsNativeEventPump`).
+  bounded native queue, lifecycle-managed observer bridge acquire/release, and an optional event
+  pump hook (`WindowsNativeEventPump`) that defaults to bridge-drain ingestion.
+  Bridge lifecycle hooks (`WindowsObserverLifecycleHook`) are available to attach/detach external
+  native subscriber runtimes at start/stop boundaries.
+  A lightweight subscriber manager scaffold is now wired by default in native-preferred monitor
+  mode, exposing `windows_native_subscriber_stats()` for start/stop diagnostics and
+  `set_windows_native_runtime_adapter(...)` for attach/detach runtime integration.
+  Native-preferred monitor construction now auto-installs a default runtime adapter scaffold
+  (`install_default_windows_runtime_adapter_if_absent()`) that binds a process-based Windows
+  UI Automation focus-change listener and triggers source reads on native signals. The default
+  adapter now tracks lifecycle state via
+  `windows_default_runtime_adapter_state()` (`attached`, `worker_running`, `attach_calls`,
+  `detach_calls`, `listener_exits`, `listener_restarts`, `listener_failures`) with idempotent
+  attach/detach transitions and bounded retry/backoff for listener startup/restart. A pluggable
+  runtime event source
+  hook (`set_windows_default_runtime_event_source(...)`) resolves text on listener signal edges.
+  By default, installer wiring now registers a UIA-backed source hook via existing
+  focused-selection reads when no custom source is provided.
 - `LinuxSelectionMonitor` (`linux-alpha`) provides a Linux polling backend with de-duplication
   using AT-SPI and primary-selection fallbacks, plus a native-event-preferred scaffold mode
-  (`LinuxMonitorBackend::NativeEventPreferred`) with a bounded native queue and optional event
-  pump hook (`LinuxNativeEventPump`).
+  (`LinuxMonitorBackend::NativeEventPreferred`) with a bounded native queue, lifecycle-managed
+  observer bridge acquire/release, and an optional event pump hook (`LinuxNativeEventPump`) that
+  defaults to bridge-drain ingestion.
+  Bridge lifecycle hooks (`LinuxObserverLifecycleHook`) are available to attach/detach external
+  native subscriber runtimes at start/stop boundaries.
+  A lightweight subscriber manager scaffold is now wired by default in native-preferred monitor
+  mode, exposing `linux_native_subscriber_stats()` for start/stop diagnostics and
+  `set_linux_native_runtime_adapter(...)` for attach/detach runtime integration.
+  Native-preferred monitor construction now auto-installs a default runtime adapter scaffold
+  (`install_default_linux_runtime_adapter_if_absent()`) that binds a process-based AT-SPI signal
+  listener (`dbus-monitor` over the accessibility bus) and triggers source reads on native
+  signals. The default adapter now tracks lifecycle state via
+  `linux_default_runtime_adapter_state()`
+  (`attached`, `worker_running`, `attach_calls`, `detach_calls`, `listener_exits`,
+  `listener_restarts`, `listener_failures`) with idempotent attach/detach transitions and bounded
+  retry/backoff for listener startup/restart. A pluggable runtime event source hook
+  (`set_linux_default_runtime_event_source(...)`) resolves text on listener signal edges. By
+  default, installer wiring now registers an
+  AT-SPI-backed source hook via existing focused-selection reads when no custom source is
+  provided.
 - Integration coverage exists for ordered event delivery and monitor loop behavior through a stub
   backend.
 - Feature-gated monitoring parity tests now validate that pump-fed native queues and manual
@@ -48,7 +83,8 @@ What exists today:
 What does not exist yet:
 
 - Async streams, channels, or subscription orchestration
-- Native observer/event-subscription lifecycle management beyond bridge activation and pump wiring
+- Direct in-process native observer bindings (`IUIAutomationEventHandler`, AT-SPI client listeners)
+  beyond the current process-listener integration
 - Debounce semantics (current coalescing support is interval-throttling)
 
 ## Scope
@@ -141,8 +177,8 @@ Future backends are expected to plug into `MonitorPlatform` without changing the
 - Linux: AT-SPI event listeners and toolkit-specific selection change hooks
 
 Those platform backends may later require richer event metadata, blocking behavior, async
-adaptation, or cancellation. Full OS-level subscriptions (`IUIAutomationEventHandler`,
-AT-SPI listeners) are still pending beyond the current queue-and-pump scaffolds.
+adaptation, or cancellation. Direct in-process subscriptions (`IUIAutomationEventHandler`,
+AT-SPI client listeners) are still pending beyond the current process-listener integration.
 
 ## Known Limitations
 

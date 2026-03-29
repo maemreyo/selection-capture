@@ -22,7 +22,24 @@ What exists today:
   (`WAYLAND_DISPLAY`, `DISPLAY`) while still retaining mixed-session fallback behavior.
 - `LinuxSelectionMonitor` supports polling (`LinuxMonitorBackend::Polling`) and a
   native-event-preferred scaffold mode (`LinuxMonitorBackend::NativeEventPreferred`) with bounded
-  queueing and an optional event pump callback (`LinuxNativeEventPump`).
+  queueing, lifecycle-managed observer bridge acquire/release, and an optional event pump
+  callback (`LinuxNativeEventPump`) that defaults to bridge-drain ingestion.
+- `LinuxObserverLifecycleHook` can be registered to bind/unbind external native subscriber
+  runtimes when observer bridge state transitions active/inactive.
+- `set_linux_native_runtime_adapter(...)` allows wiring a concrete native attach/detach
+  implementation while `linux_native_subscriber_stats()` tracks adapter attempts/failures.
+- `linux_default_runtime_adapter_state()` exposes default adapter lifecycle state
+  (`attached`, `worker_running`, `attach_calls`, `detach_calls`, `listener_exits`,
+  `listener_restarts`, `listener_failures`) for diagnostic assertions during staged native
+  rollout.
+- `set_linux_default_runtime_event_source(...)` allows wiring a runtime event source used when the
+  default Linux listener emits AT-SPI signal notifications.
+- Default runtime adapter now runs an OS event listener process (`dbus-monitor` over the a11y bus
+  via Python bootstrap) and pushes bridge events on signal boundaries, instead of timer polling.
+- Listener attach/restart now uses bounded exponential backoff for transient startup failures and
+  unexpected listener exits.
+- Default runtime adapter installation auto-registers an AT-SPI-backed source hook when no custom
+  event source is already configured.
 
 ## Setup
 
@@ -88,8 +105,8 @@ In addition, backend command plans are session-aware:
 - `AccessibilityRange` is mapped to primary-selection reads and may be unavailable on restricted
   Wayland/X11 sessions.
 - `SyntheticCopy` currently shares the clipboard dispatch slot (no Linux key-synthesis path yet).
-- Native-event-preferred monitor mode currently depends on caller-provided pump callbacks;
-  direct AT-SPI listener subscription wiring is not yet implemented.
+- Native-event-preferred monitor mode now supports default process-based AT-SPI signal push, but
+  direct in-process AT-SPI listener bindings are not yet implemented.
 - There is no Linux-specific cleanup behavior yet.
 - There is no Linux permission, accessibility bus, display-server, or capability detection yet.
 - The alpha surface is suitable for engine integration and limited local capture experiments.
