@@ -50,6 +50,7 @@ pub fn capture(
                     methods_tried,
                     None,
                     false,
+                    start,
                 );
             }
 
@@ -65,6 +66,7 @@ pub fn capture(
                     methods_tried,
                     None,
                     false,
+                    start,
                 );
             }
 
@@ -101,19 +103,28 @@ pub fn capture(
                         methods_tried,
                         None,
                         false,
+                        start,
                     );
                 }
             }
 
             methods_tried.push(method);
             push_trace(&mut trace, TraceEvent::MethodStarted(method));
+            let attempt_started_at = Instant::now();
             let result = platform.attempt(method, active_app.as_ref());
+            push_trace(
+                &mut trace,
+                TraceEvent::MethodFinished {
+                    method,
+                    elapsed: attempt_started_at.elapsed(),
+                },
+            );
             store_profile_update(store, active_app.as_ref(), method, &result);
 
             match result {
                 PlatformAttemptResult::Success(text) => {
                     push_trace(&mut trace, TraceEvent::MethodSucceeded(method));
-                    return finish_success(platform, trace, text, method);
+                    return finish_success(platform, trace, text, method, start);
                 }
                 PlatformAttemptResult::EmptySelection => {
                     push_trace(&mut trace, TraceEvent::MethodReturnedEmpty(method));
@@ -167,6 +178,7 @@ pub fn capture(
         methods_tried,
         None,
         false,
+        start,
     )
 }
 
@@ -209,6 +221,7 @@ pub fn try_capture(
                 methods_tried,
                 None,
                 false,
+                start,
             ));
         }
 
@@ -223,6 +236,7 @@ pub fn try_capture(
                 methods_tried,
                 None,
                 false,
+                start,
             ));
         }
 
@@ -238,13 +252,21 @@ pub fn try_capture(
 
         methods_tried.push(method);
         push_trace(&mut trace, TraceEvent::MethodStarted(method));
+        let attempt_started_at = Instant::now();
         let result = platform.attempt(method, active_app.as_ref());
+        push_trace(
+            &mut trace,
+            TraceEvent::MethodFinished {
+                method,
+                elapsed: attempt_started_at.elapsed(),
+            },
+        );
         store_profile_update(store, active_app.as_ref(), method, &result);
 
         match result {
             PlatformAttemptResult::Success(text) => {
                 push_trace(&mut trace, TraceEvent::MethodSucceeded(method));
-                return Ok(finish_success(platform, trace, text, method));
+                return Ok(finish_success(platform, trace, text, method, start));
             }
             PlatformAttemptResult::EmptySelection => {
                 push_trace(&mut trace, TraceEvent::MethodReturnedEmpty(method));
@@ -304,6 +326,7 @@ pub fn try_capture(
         methods_tried,
         None,
         false,
+        start,
     ))
 }
 
@@ -352,9 +375,10 @@ fn finish_success(
     mut trace: Option<CaptureTrace>,
     text: String,
     method: CaptureMethod,
+    started_at: Instant,
 ) -> CaptureOutcome {
     let cleanup_status = platform.cleanup();
-    set_cleanup(&mut trace, cleanup_status);
+    finalize_trace(&mut trace, cleanup_status, started_at.elapsed());
     CaptureOutcome::Success(CaptureSuccess {
         text,
         method,
@@ -372,10 +396,11 @@ fn finish_failure(
     methods_tried: Vec<CaptureMethod>,
     last_method: Option<CaptureMethod>,
     cleanup_failed: bool,
+    started_at: Instant,
 ) -> CaptureOutcome {
     let cleanup_status = platform.cleanup();
     let cleanup_failed = cleanup_failed || cleanup_status == CleanupStatus::ClipboardRestoreFailed;
-    set_cleanup(&mut trace, cleanup_status);
+    finalize_trace(&mut trace, cleanup_status, started_at.elapsed());
 
     CaptureOutcome::Failure(CaptureFailure {
         status,
@@ -397,9 +422,14 @@ fn push_trace(trace: &mut Option<CaptureTrace>, event: TraceEvent) {
     }
 }
 
-fn set_cleanup(trace: &mut Option<CaptureTrace>, status: CleanupStatus) {
+fn finalize_trace(
+    trace: &mut Option<CaptureTrace>,
+    status: CleanupStatus,
+    total_elapsed: Duration,
+) {
     if let Some(trace) = trace.as_mut() {
         trace.cleanup_status = status;
+        trace.total_elapsed = total_elapsed;
         trace.events.push(TraceEvent::CleanupFinished(status));
     }
 }
@@ -539,6 +569,51 @@ mod tests {
     }
 
     #[test]
+    fn capture_trace_records_method_timing_and_total_elapsed() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.test".into(),
+                name: "Test".into(),
+            }),
+            responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                "hello".into(),
+            )])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let store = StubStore;
+        let cancel = NeverCancel;
+        let adapter = NoAdapters;
+        let mut options = CaptureOptions {
+            collect_trace: true,
+            ..CaptureOptions::default()
+        };
+        options.retry_policy.primary_accessibility = vec![Duration::ZERO];
+        options.retry_policy.range_accessibility = vec![Duration::ZERO];
+        options.retry_policy.clipboard = vec![Duration::ZERO];
+        options.overall_timeout = Duration::from_secs(1);
+
+        let out = capture(&platform, &store, &cancel, &[&adapter], &options);
+        match out {
+            CaptureOutcome::Success(success) => {
+                let trace = success.trace.expect("trace");
+                assert!(trace.events.iter().any(|event| matches!(
+                    event,
+                    TraceEvent::MethodFinished {
+                        method: CaptureMethod::AccessibilityPrimary,
+                        ..
+                    }
+                )));
+                assert!(trace.events.iter().any(|event| matches!(
+                    event,
+                    TraceEvent::CleanupFinished(CleanupStatus::Clean)
+                )));
+                assert!(trace.total_elapsed <= options.overall_timeout);
+            }
+            other => panic!("expected success, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn skips_retry_when_budget_is_too_small() {
         let platform = StubPlatform {
             app: Some(ActiveApp {
@@ -665,6 +740,52 @@ mod tests {
             CaptureOutcome::Success(success) => {
                 assert_eq!(success.method, CaptureMethod::AccessibilityPrimary);
                 assert_eq!(success.text, "hello");
+            }
+            other => panic!("expected success, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn try_capture_trace_records_method_timing_and_total_elapsed() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.test".into(),
+                name: "Test".into(),
+            }),
+            responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                "hello".into(),
+            )])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let store = StubStore;
+        let cancel = NeverCancel;
+        let adapter = NoAdapters;
+        let mut options = CaptureOptions {
+            collect_trace: true,
+            ..CaptureOptions::default()
+        };
+        options.retry_policy.primary_accessibility = vec![Duration::ZERO];
+        options.retry_policy.range_accessibility = vec![Duration::ZERO];
+        options.retry_policy.clipboard = vec![Duration::from_millis(120)];
+        options.overall_timeout = Duration::from_secs(1);
+
+        let out = try_capture(&platform, &store, &cancel, &[&adapter], &options)
+            .expect("should not block");
+        match out {
+            CaptureOutcome::Success(success) => {
+                let trace = success.trace.expect("trace");
+                assert!(trace.events.iter().any(|event| matches!(
+                    event,
+                    TraceEvent::MethodFinished {
+                        method: CaptureMethod::AccessibilityPrimary,
+                        ..
+                    }
+                )));
+                assert!(trace.events.iter().any(|event| matches!(
+                    event,
+                    TraceEvent::CleanupFinished(CleanupStatus::Clean)
+                )));
+                assert!(trace.total_elapsed <= options.overall_timeout);
             }
             other => panic!("expected success, got {other:?}"),
         }

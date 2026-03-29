@@ -96,6 +96,10 @@ pub enum TraceEvent {
     CaptureStarted,
     ActiveAppDetected(ActiveApp),
     MethodStarted(CaptureMethod),
+    MethodFinished {
+        method: CaptureMethod,
+        elapsed: Duration,
+    },
     MethodSucceeded(CaptureMethod),
     MethodReturnedEmpty(CaptureMethod),
     MethodFailed {
@@ -120,6 +124,7 @@ pub enum TraceEvent {
 pub struct CaptureTrace {
     pub events: Vec<TraceEvent>,
     pub cleanup_status: CleanupStatus,
+    pub total_elapsed: Duration,
 }
 
 impl Default for CaptureTrace {
@@ -127,6 +132,7 @@ impl Default for CaptureTrace {
         Self {
             events: Vec::new(),
             cleanup_status: CleanupStatus::Clean,
+            total_elapsed: Duration::ZERO,
         }
     }
 }
