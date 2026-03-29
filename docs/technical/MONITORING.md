@@ -22,6 +22,9 @@ What exists today:
   `ax_observer_drain_events_for_monitor()` as the `native_event_pump` callback, and
   `MacOSSelectionMonitor` now auto-wires this pump by default when native observer mode
   activates successfully.
+- Native bridge lifecycle now uses acquire/release semantics so multiple monitor instances can
+  coexist without tearing down each other; bridge usage is released automatically when a monitor
+  is dropped.
 - `WindowsSelectionMonitor` (`windows-beta`) provides a Windows polling backend with
   de-duplication using UI Automation/Legacy IAccessible selection reads.
 - `LinuxSelectionMonitor` (`linux-alpha`) provides a Linux polling backend with de-duplication

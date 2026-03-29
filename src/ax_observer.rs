@@ -7,6 +7,7 @@ const DEFAULT_DRAIN_BATCH_SIZE: usize = 64;
 
 static OBSERVER_ACTIVE: AtomicBool = AtomicBool::new(false);
 static OBSERVER_DROPPED_EVENTS: AtomicU64 = AtomicU64::new(0);
+static OBSERVER_CLIENTS: AtomicU64 = AtomicU64::new(0);
 
 fn observer_queue() -> &'static Mutex<VecDeque<String>> {
     static QUEUE: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
@@ -21,7 +22,38 @@ impl AxObserverBridge {
     }
 
     pub fn stop() -> bool {
-        OBSERVER_ACTIVE.swap(false, Ordering::SeqCst)
+        let was_active = OBSERVER_ACTIVE.swap(false, Ordering::SeqCst);
+        OBSERVER_CLIENTS.store(0, Ordering::SeqCst);
+        if let Ok(mut queue) = observer_queue().lock() {
+            queue.clear();
+        }
+        was_active
+    }
+
+    pub fn acquire() -> bool {
+        let previous = OBSERVER_CLIENTS.fetch_add(1, Ordering::SeqCst);
+        if previous == 0 {
+            let _ = Self::start();
+        }
+        Self::is_active()
+    }
+
+    pub fn release() -> bool {
+        loop {
+            let current = OBSERVER_CLIENTS.load(Ordering::SeqCst);
+            if current == 0 {
+                return Self::is_active();
+            }
+            if OBSERVER_CLIENTS
+                .compare_exchange(current, current - 1, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                if current == 1 {
+                    let _ = Self::stop();
+                }
+                return Self::is_active();
+            }
+        }
     }
 
     pub fn is_active() -> bool {
@@ -100,6 +132,7 @@ mod tests {
     fn reset_state() {
         OBSERVER_ACTIVE.store(false, Ordering::SeqCst);
         OBSERVER_DROPPED_EVENTS.store(0, Ordering::SeqCst);
+        OBSERVER_CLIENTS.store(0, Ordering::SeqCst);
         if let Ok(mut queue) = observer_queue().lock() {
             queue.clear();
         }
@@ -137,5 +170,28 @@ mod tests {
         assert!(AxObserverBridge::start());
         assert!(AxObserverBridge::stop());
         assert!(!AxObserverBridge::is_active());
+    }
+
+    #[test]
+    fn observer_acquire_release_tracks_lifecycle() {
+        let _guard = test_lock().lock().expect("test lock poisoned");
+        reset_state();
+        assert!(AxObserverBridge::acquire());
+        assert!(AxObserverBridge::is_active());
+        assert!(AxObserverBridge::acquire());
+        assert!(AxObserverBridge::release());
+        assert!(AxObserverBridge::is_active());
+        assert!(!AxObserverBridge::release());
+        assert!(!AxObserverBridge::is_active());
+    }
+
+    #[test]
+    fn observer_stop_clears_queued_events() {
+        let _guard = test_lock().lock().expect("test lock poisoned");
+        reset_state();
+        assert!(AxObserverBridge::start());
+        assert!(AxObserverBridge::push_event("queued"));
+        assert!(AxObserverBridge::stop());
+        assert!(AxObserverBridge::drain_events(8).is_empty());
     }
 }

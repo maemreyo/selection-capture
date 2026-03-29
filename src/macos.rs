@@ -29,6 +29,7 @@ pub struct MacOSSelectionMonitor {
     pub poll_interval: Duration,
     backend: MacOSMonitorBackend,
     native_observer_active: bool,
+    native_observer_attached: bool,
     native_event_pump: Option<MacOSNativeEventPump>,
 }
 
@@ -180,6 +181,7 @@ impl MacOSSelectionMonitor {
             poll_interval: options.poll_interval,
             backend: options.backend,
             native_observer_active,
+            native_observer_attached: native_observer_active,
             native_event_pump,
         }
     }
@@ -327,17 +329,29 @@ impl MonitorPlatform for MacOSSelectionMonitor {
     }
 }
 
+impl Drop for MacOSSelectionMonitor {
+    fn drop(&mut self) {
+        if self.native_observer_attached {
+            let _ = AxObserverBridge::release();
+        }
+    }
+}
+
 fn try_enable_native_observer() -> bool {
     #[cfg(test)]
     if let Some(forced) = forced_native_observer_activation() {
-        return forced;
+        return if forced {
+            AxObserverBridge::acquire()
+        } else {
+            false
+        };
     }
 
     if !application_is_trusted() {
         return false;
     }
 
-    AxObserverBridge::start() || AxObserverBridge::is_active()
+    AxObserverBridge::acquire()
 }
 
 #[cfg(test)]
@@ -632,6 +646,7 @@ mod tests {
             native_event_pump: None,
         });
         monitor.native_observer_active = true;
+        monitor.native_observer_attached = false;
 
         assert!(monitor.enqueue_native_selection_event("first"));
         assert!(!monitor.enqueue_native_selection_event("first"));
@@ -697,6 +712,7 @@ mod tests {
             native_event_pump: None,
         });
         monitor.native_observer_active = true;
+        monitor.native_observer_attached = false;
 
         assert!(monitor.ingest_native_observer_payload(
             MacOSNativeEventSource::AXObserverSelectionChanged,
@@ -733,6 +749,7 @@ mod tests {
             native_event_pump: Some(test_native_event_pump),
         });
         monitor.native_observer_active = true;
+        monitor.native_observer_attached = false;
 
         assert_eq!(monitor.next_selection_text(), Some("a".to_string()));
         assert_eq!(monitor.next_selection_text(), Some("b".to_string()));
@@ -764,5 +781,28 @@ mod tests {
         assert_eq!(monitor.next_selection_text(), Some("bridge-a".to_string()));
         assert_eq!(monitor.next_selection_text(), Some("bridge-b".to_string()));
         assert_eq!(monitor.next_selection_text(), None);
+    }
+
+    #[test]
+    fn selection_monitor_drop_releases_ax_observer_bridge() {
+        let _guard = monitor_test_lock()
+            .lock()
+            .expect("monitor test lock poisoned");
+        force_native_observer_activation(Some(true));
+        let _ = AxObserverBridge::stop();
+        let _ = AxObserverBridge::drain_events(usize::MAX);
+
+        {
+            let monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
+                poll_interval: Duration::from_millis(75),
+                backend: MacOSMonitorBackend::NativeObserverPreferred,
+                native_queue_capacity: 4,
+                native_event_pump: None,
+            });
+            assert!(monitor.native_observer_active());
+            assert!(AxObserverBridge::is_active());
+        }
+
+        assert!(!AxObserverBridge::is_active());
     }
 }
