@@ -13,12 +13,13 @@ What exists today:
   - Clipboard
 - Clipboard path reads real clipboard text via PowerShell (`Get-Clipboard -Raw`) on Windows.
 - Active app detection is available on Windows via foreground-window process lookup.
-- UI Automation and IAccessible paths currently stay scaffolded and return `Unavailable`.
+- UI Automation primary path uses PowerShell/.NET UIAutomation against the focused element
+  (`TextPattern` first, `ValuePattern` fallback).
+- IAccessible path currently stays scaffolded and returns `Unavailable`.
 - Fallback behavior is covered by unit and smoke tests.
 
 What does not exist yet:
 
-- Real UI Automation capture
 - Real IAccessible range capture
 - Real synthetic copy flow (Ctrl+C + restore semantics)
 
@@ -62,7 +63,9 @@ Current `CaptureMethod` mapping in `WindowsPlatform`:
 
 - Clipboard capture currently reads existing clipboard content and does not synthesize copy.
 - Active app detection depends on PowerShell/user32 lookup and may fail in restricted sessions.
-- UI Automation and IAccessible attempts still return `Unavailable`.
+- UI Automation capture depends on the focused element exposing `TextPattern` or `ValuePattern`;
+  many desktop apps still return empty values.
+- IAccessible attempts still return `Unavailable`.
 - `SyntheticCopy` does not yet synthesize key input; it currently shares clipboard dispatch.
 - There is no Windows-specific cleanup behavior yet.
 - There is no Windows permission or capability detection yet.

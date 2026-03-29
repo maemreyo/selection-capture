@@ -17,7 +17,25 @@ struct DefaultWindowsBackend;
 
 impl WindowsBackend for DefaultWindowsBackend {
     fn attempt_ui_automation(&self) -> PlatformAttemptResult {
-        PlatformAttemptResult::Unavailable
+        #[cfg(target_os = "windows")]
+        {
+            match read_uia_text() {
+                Ok(Some(text)) => {
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        PlatformAttemptResult::EmptySelection
+                    } else {
+                        PlatformAttemptResult::Success(trimmed.to_string())
+                    }
+                }
+                Ok(None) => PlatformAttemptResult::EmptySelection,
+                Err(_) => PlatformAttemptResult::Unavailable,
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            PlatformAttemptResult::Unavailable
+        }
     }
 
     fn attempt_iaccessible(&self) -> PlatformAttemptResult {
@@ -120,7 +138,59 @@ fn read_clipboard_text() -> Result<Option<String>, String> {
     }
 
     let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
-    Ok(normalize_clipboard_stdout(&stdout))
+    Ok(normalize_windows_text_stdout(&stdout))
+}
+
+#[cfg(target_os = "windows")]
+fn read_uia_text() -> Result<Option<String>, String> {
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            r#"
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+if ($null -eq $focused) { return }
+try {
+  $textPattern = $focused.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+} catch {
+  $textPattern = $null
+}
+if ($null -ne $textPattern) {
+  $selection = $textPattern.GetSelection()
+  if ($null -ne $selection -and $selection.Length -gt 0) {
+    $text = $selection[0].GetText(-1)
+    if ($null -ne $text -and $text.Trim().Length -gt 0) {
+      Write-Output $text
+      return
+    }
+  }
+}
+try {
+  $valuePattern = $focused.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+} catch {
+  $valuePattern = $null
+}
+if ($null -ne $valuePattern) {
+  $value = $valuePattern.Current.Value
+  if ($null -ne $value -and $value.Trim().Length -gt 0) {
+    Write-Output $value
+    return
+  }
+}
+"#,
+        ])
+        .output()
+        .map_err(|err| err.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+    Ok(normalize_windows_text_stdout(&stdout))
 }
 
 #[cfg(target_os = "windows")]
@@ -167,7 +237,7 @@ Write-Output ("PATH:" + $path)
 }
 
 #[cfg(target_os = "windows")]
-fn normalize_clipboard_stdout(stdout: &str) -> Option<String> {
+fn normalize_windows_text_stdout(stdout: &str) -> Option<String> {
     let text = stdout.replace("\r\n", "\n");
     let normalized = text.trim_end_matches(['\r', '\n']);
     if normalized.is_empty() {
@@ -275,19 +345,19 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn normalizes_clipboard_stdout_and_strips_trailing_newline() {
+    fn normalizes_windows_text_stdout_and_strips_trailing_newline() {
         let raw = "line one\r\nline two\r\n";
         assert_eq!(
-            normalize_clipboard_stdout(raw),
+            normalize_windows_text_stdout(raw),
             Some("line one\nline two".to_string())
         );
     }
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn returns_none_when_clipboard_stdout_is_effectively_empty() {
-        assert_eq!(normalize_clipboard_stdout("\r\n"), None);
-        assert_eq!(normalize_clipboard_stdout(""), None);
+    fn returns_none_when_windows_text_stdout_is_effectively_empty() {
+        assert_eq!(normalize_windows_text_stdout("\r\n"), None);
+        assert_eq!(normalize_windows_text_stdout(""), None);
     }
 
     #[cfg(target_os = "windows")]
