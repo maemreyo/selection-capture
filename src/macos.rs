@@ -1,5 +1,9 @@
+#[cfg(target_os = "macos")]
+use crate::ax_observer_drain_events_for_monitor;
 use crate::traits::{CapturePlatform, MonitorPlatform};
 use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
+#[cfg(target_os = "macos")]
+use crate::AxObserverBridge;
 use accessibility_ng::{AXAttribute, AXUIElement};
 use accessibility_sys_ng::{kAXFocusedUIElementAttribute, kAXSelectedTextAttribute};
 use active_win_pos_rs::get_active_window;
@@ -8,6 +12,8 @@ use macos_accessibility_client::accessibility::application_is_trusted;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -158,6 +164,13 @@ impl MacOSSelectionMonitor {
             options.backend,
             MacOSMonitorBackend::NativeObserverPreferred
         ) && try_enable_native_observer();
+        let native_event_pump = if native_observer_active {
+            options
+                .native_event_pump
+                .or(Some(ax_observer_drain_events_for_monitor))
+        } else {
+            options.native_event_pump
+        };
 
         Self {
             last_emitted: Mutex::new(None),
@@ -167,7 +180,7 @@ impl MacOSSelectionMonitor {
             poll_interval: options.poll_interval,
             backend: options.backend,
             native_observer_active,
-            native_event_pump: options.native_event_pump,
+            native_event_pump,
         }
     }
 
@@ -315,7 +328,43 @@ impl MonitorPlatform for MacOSSelectionMonitor {
 }
 
 fn try_enable_native_observer() -> bool {
-    false
+    #[cfg(test)]
+    if let Some(forced) = forced_native_observer_activation() {
+        return forced;
+    }
+
+    if !application_is_trusted() {
+        return false;
+    }
+
+    AxObserverBridge::start() || AxObserverBridge::is_active()
+}
+
+#[cfg(test)]
+static FORCED_NATIVE_OBSERVER_ACTIVATION: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static FORCED_NATIVE_OBSERVER_ACTIVATION_SET: AtomicBool = AtomicBool::new(false);
+
+#[cfg(test)]
+fn force_native_observer_activation(value: Option<bool>) {
+    match value {
+        Some(enabled) => {
+            FORCED_NATIVE_OBSERVER_ACTIVATION.store(enabled, Ordering::SeqCst);
+            FORCED_NATIVE_OBSERVER_ACTIVATION_SET.store(true, Ordering::SeqCst);
+        }
+        None => {
+            FORCED_NATIVE_OBSERVER_ACTIVATION_SET.store(false, Ordering::SeqCst);
+        }
+    }
+}
+
+#[cfg(test)]
+fn forced_native_observer_activation() -> Option<bool> {
+    if FORCED_NATIVE_OBSERVER_ACTIVATION_SET.load(Ordering::SeqCst) {
+        Some(FORCED_NATIVE_OBSERVER_ACTIVATION.load(Ordering::SeqCst))
+    } else {
+        None
+    }
 }
 
 fn get_selected_text_by_ax() -> Result<String, String> {
@@ -479,12 +528,24 @@ return "STATUS:OK" & linefeed & theSelectedText
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AxObserverBridge;
     use std::collections::VecDeque;
-    use std::sync::OnceLock;
+    use std::sync::{Mutex, OnceLock};
 
     fn native_pump_batches() -> &'static Mutex<VecDeque<Vec<String>>> {
         static BATCHES: OnceLock<Mutex<VecDeque<Vec<String>>>> = OnceLock::new();
         BATCHES.get_or_init(|| Mutex::new(VecDeque::new()))
+    }
+
+    fn monitor_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn reset_native_observer_state_for_tests() {
+        force_native_observer_activation(Some(false));
+        let _ = AxObserverBridge::stop();
+        let _ = AxObserverBridge::drain_events(usize::MAX);
     }
 
     fn push_native_pump_batch(batch: Vec<String>) {
@@ -515,6 +576,10 @@ mod tests {
 
     #[test]
     fn selection_monitor_default_poll_interval_is_stable() {
+        let _guard = monitor_test_lock()
+            .lock()
+            .expect("monitor test lock poisoned");
+        reset_native_observer_state_for_tests();
         let monitor = MacOSSelectionMonitor::default();
         assert_eq!(monitor.poll_interval, Duration::from_millis(120));
         assert_eq!(monitor.backend(), MacOSMonitorBackend::Polling);
@@ -523,6 +588,10 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_preferred_falls_back_to_polling_path() {
+        let _guard = monitor_test_lock()
+            .lock()
+            .expect("monitor test lock poisoned");
+        reset_native_observer_state_for_tests();
         let monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
             poll_interval: Duration::from_millis(75),
             backend: MacOSMonitorBackend::NativeObserverPreferred,
@@ -540,6 +609,10 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_queue_ignores_empty_events() {
+        let _guard = monitor_test_lock()
+            .lock()
+            .expect("monitor test lock poisoned");
+        reset_native_observer_state_for_tests();
         let monitor = MacOSSelectionMonitor::default();
 
         assert!(!monitor.enqueue_native_selection_event(""));
@@ -548,6 +621,10 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_queue_emits_in_order_and_dedups() {
+        let _guard = monitor_test_lock()
+            .lock()
+            .expect("monitor test lock poisoned");
+        reset_native_observer_state_for_tests();
         let mut monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
             poll_interval: Duration::from_millis(75),
             backend: MacOSMonitorBackend::NativeObserverPreferred,
@@ -567,6 +644,10 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_queue_applies_capacity_and_tracks_drops() {
+        let _guard = monitor_test_lock()
+            .lock()
+            .expect("monitor test lock poisoned");
+        reset_native_observer_state_for_tests();
         let monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
             poll_interval: Duration::from_millis(50),
             backend: MacOSMonitorBackend::Polling,
@@ -584,6 +665,10 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_queue_batch_enqueue_counts_accepts() {
+        let _guard = monitor_test_lock()
+            .lock()
+            .expect("monitor test lock poisoned");
+        reset_native_observer_state_for_tests();
         let monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
             poll_interval: Duration::from_millis(50),
             backend: MacOSMonitorBackend::Polling,
@@ -601,6 +686,10 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_observer_payload_uses_same_backpressure_path() {
+        let _guard = monitor_test_lock()
+            .lock()
+            .expect("monitor test lock poisoned");
+        reset_native_observer_state_for_tests();
         let mut monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
             poll_interval: Duration::from_millis(50),
             backend: MacOSMonitorBackend::NativeObserverPreferred,
@@ -630,6 +719,10 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_event_pump_feeds_queue_with_backpressure_rules() {
+        let _guard = monitor_test_lock()
+            .lock()
+            .expect("monitor test lock poisoned");
+        reset_native_observer_state_for_tests();
         push_native_pump_batch(vec!["a".into(), "a".into(), "b".into()]);
         push_native_pump_batch(vec!["c".into()]);
 
@@ -646,5 +739,30 @@ mod tests {
         assert_eq!(monitor.next_selection_text(), Some("c".to_string()));
         assert_eq!(monitor.next_selection_text(), None);
         assert_eq!(monitor.native_events_dropped(), 0);
+    }
+
+    #[test]
+    fn selection_monitor_native_preferred_uses_ax_observer_bridge_pump_by_default() {
+        let _guard = monitor_test_lock()
+            .lock()
+            .expect("monitor test lock poisoned");
+        force_native_observer_activation(Some(true));
+        let _ = AxObserverBridge::stop();
+        let _ = AxObserverBridge::drain_events(usize::MAX);
+        assert!(AxObserverBridge::start());
+
+        let monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(75),
+            backend: MacOSMonitorBackend::NativeObserverPreferred,
+            native_queue_capacity: 4,
+            native_event_pump: None,
+        });
+
+        assert!(monitor.native_observer_active());
+        assert!(AxObserverBridge::push_event("bridge-a"));
+        assert!(AxObserverBridge::push_event("bridge-b"));
+        assert_eq!(monitor.next_selection_text(), Some("bridge-a".to_string()));
+        assert_eq!(monitor.next_selection_text(), Some("bridge-b".to_string()));
+        assert_eq!(monitor.next_selection_text(), None);
     }
 }

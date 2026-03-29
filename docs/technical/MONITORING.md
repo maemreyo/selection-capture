@@ -16,10 +16,12 @@ What exists today:
   (`MacOSMonitorBackend::NativeObserverPreferred`) that currently uses a bounded native-event
   queue (tail de-dup + drop counter) with safe fallback to polling, plus callback ingress API
   (`ingest_native_observer_payload(...)`) and an optional native pump hook
-  (`native_event_pump`) for future AXObserver wiring.
+  (`native_event_pump`).
 - `AxObserverBridge` (macOS-only scaffold) provides a process-local bridge with active-state
   gating, bounded queueing, tail de-duplication, and drop metrics; monitor integration can use
-  `ax_observer_drain_events_for_monitor()` as the `native_event_pump` callback.
+  `ax_observer_drain_events_for_monitor()` as the `native_event_pump` callback, and
+  `MacOSSelectionMonitor` now auto-wires this pump by default when native observer mode
+  activates successfully.
 - `WindowsSelectionMonitor` (`windows-beta`) provides a Windows polling backend with
   de-duplication using UI Automation/Legacy IAccessible selection reads.
 - `LinuxSelectionMonitor` (`linux-alpha`) provides a Linux polling backend with de-duplication
@@ -30,7 +32,7 @@ What exists today:
 What does not exist yet:
 
 - Async streams, channels, or subscription orchestration
-- Native observer/event-subscription lifecycle management (scaffold exists on macOS, not wired yet)
+- Native observer/event-subscription lifecycle management beyond bridge activation and pump wiring
 - Debounce semantics (current coalescing support is interval-throttling)
 
 ## Scope
@@ -131,7 +133,8 @@ adaptation, or cancellation. That work is intentionally deferred until native ho
 - There is no timestamp, source app, or method metadata
 - The wrapper does not own background tasks or event subscriptions
 - The API does not distinguish "no event yet" from "monitor exhausted"
-- macOS implementation is polling-based, not callback-based (`AXObserver`) yet
+- macOS native-preferred mode can ingest bridge-fed callback payloads, but full OS-level
+  `AXObserver` runloop lifecycle wiring is still pending
 - Coalescing mode intentionally drops events inside the emit interval window
 - Guarded mode intentionally suppresses events based on configured duplicate/interval policy
 - `stable_polls_required` drops transient/flicker updates until the same value is observed enough polls

@@ -124,7 +124,6 @@ fn main() {
 use selection_capture::{
     CancelSignal, CaptureMetrics, CaptureMonitor, MacOSMonitorBackend, MacOSSelectionMonitor,
     MacOSNativeEventSource, MacOSSelectionMonitorOptions, MonitorPlatform, MonitorSpamGuard,
-    ax_observer_drain_events_for_monitor,
 };
 
 struct StubMonitor;
@@ -150,7 +149,7 @@ let _native_pref = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitor
     poll_interval: std::time::Duration::from_millis(120),
     backend: MacOSMonitorBackend::NativeObserverPreferred,
     native_queue_capacity: 256,
-    native_event_pump: Some(ax_observer_drain_events_for_monitor),
+    native_event_pump: None, // defaults to AxObserverBridge drain pump when native observer activates
 });
 let _ = _native_pref.enqueue_native_selection_event("hello from observer");
 let _ = _native_pref.ingest_native_observer_payload(
