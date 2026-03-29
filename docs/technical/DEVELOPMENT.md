@@ -64,6 +64,13 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --verbose
 ```
 
+For the Windows beta scaffold, also run:
+
+```bash
+cargo test --features windows-beta --lib --verbose
+cargo test --features windows-beta --test windows_smoke --verbose
+```
+
 ### 4. Update Documentation
 
 If you've changed public APIs:
@@ -114,7 +121,10 @@ mod tests {
 
 ### Integration Tests
 
-For testing the full capture flow. These would go in `tests/` directory (not yet created).
+For testing the full capture flow. Integration tests live in `tests/`.
+
+Current coverage includes `tests/windows_smoke.rs`, which validates fallback ordering for the
+`windows-beta` feature using a stub `CapturePlatform`.
 
 ### Manual Testing
 
@@ -195,6 +205,13 @@ pub use windows::WindowsPlatform;
 
 4. Update documentation
 5. Add platform-specific CI job
+
+### Windows Beta Development Notes
+
+- Gate all Windows work behind the `windows-beta` feature.
+- Keep non-Windows hosts compile-safe. The beta path must build and test on macOS/Linux without a Windows runtime.
+- Treat `src/windows.rs` as a bounded MVP dispatcher for now: UI Automation, IAccessible, and clipboard paths may return `Unavailable` until native implementations are added.
+- Keep fallback semantics covered through `tests/windows_smoke.rs` and the Windows CI job.
 
 ### macOS Development Notes
 

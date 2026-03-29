@@ -24,6 +24,7 @@ with explicit capture status and trace metadata for app-level UX decisions.
 ## Platform Support
 
 - **macOS**: Fully implemented (`MacOSPlatform`)
+- **Windows**: `windows-beta` feature flag exposes a bounded MVP scaffold with compile-safe dispatch and fallback tests. Current attempts return `Unavailable` until backend implementations land.
 - **Other platforms**: Portable API via `CapturePlatform` trait, implementations welcome!
 
 ## Installation
@@ -40,6 +41,13 @@ Or use the latest from Git:
 ```toml
 [dependencies]
 selection-capture = { git = "https://github.com/maemreyo/selection-capture" }
+```
+
+Enable the Windows beta scaffold explicitly:
+
+```toml
+[dependencies]
+selection-capture = { version = "0.1", features = ["windows-beta"] }
 ```
 
 ## Quick Start (macOS)
@@ -165,6 +173,10 @@ cargo build
 # Run tests
 cargo test
 
+# Run the Windows beta smoke path on any host
+cargo test --features windows-beta --lib
+cargo test --features windows-beta --test windows_smoke
+
 # Check formatting
 cargo fmt --check
 
@@ -177,6 +189,7 @@ cargo clippy --all-targets
 - [API Documentation](https://docs.rs/selection-capture)
 - [Specification](SPEC.md)
 - [Changelog](CHANGELOG.md)
+- [Windows Beta Notes](docs/technical/WINDOWS.md)
 
 ## Related Projects
 

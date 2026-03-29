@@ -48,6 +48,19 @@ jobs:
       - name: Run tests
         run: cargo test --verbose
 
+  # Build and test windows-beta on Windows
+  test-windows-beta:
+    name: Test (Windows beta)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run library tests
+        run: cargo test --features windows-beta --lib --verbose
+      - name: Run windows smoke tests
+        run: cargo test --features windows-beta --test windows_smoke --verbose
+
   # Build on Linux (cross-compilation check)
   build-linux:
     name: Build (Linux)
