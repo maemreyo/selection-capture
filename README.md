@@ -131,6 +131,8 @@ impl MonitorPlatform for StubMonitor {
 
 let monitor = CaptureMonitor::new(StubMonitor);
 assert_eq!(monitor.next_event(), Some("example selection".to_string()));
+let processed = monitor.run_with_limit(10, |text| println!("selection: {text}"));
+assert_eq!(processed, 1);
 
 let mut metrics = CaptureMetrics::default();
 // metrics.record_outcome(&capture_outcome);
@@ -141,6 +143,7 @@ Current limitations:
 - No built-in macOS, Windows, or Linux monitoring backend exists yet
 - No async stream integration exists yet
 - No OS event subscription, lifecycle, or permission handling is implemented yet
+- `None` from backend is treated as "no more events" by `run(...)` APIs
 
 ### Return Types
 

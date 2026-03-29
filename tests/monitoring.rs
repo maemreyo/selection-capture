@@ -42,6 +42,42 @@ fn monitor_emits_events_in_backend_order() {
 }
 
 #[test]
+fn monitor_run_processes_until_backend_returns_none() {
+    let platform = StubMonitorPlatform::new(vec![Some("first"), Some("second"), None]);
+    let monitor = CaptureMonitor::new(platform);
+    let mut observed = Vec::new();
+
+    let processed = monitor.run(|event| observed.push(event));
+
+    assert_eq!(processed, 2);
+    assert_eq!(observed, vec!["first".to_string(), "second".to_string()]);
+}
+
+#[test]
+fn monitor_run_with_limit_stops_at_max_events() {
+    let platform = StubMonitorPlatform::new(vec![Some("first"), Some("second"), Some("third")]);
+    let monitor = CaptureMonitor::new(platform);
+    let mut observed = Vec::new();
+
+    let processed = monitor.run_with_limit(2, |event| observed.push(event));
+
+    assert_eq!(processed, 2);
+    assert_eq!(observed, vec!["first".to_string(), "second".to_string()]);
+    assert_eq!(monitor.next_event(), Some("third".to_string()));
+}
+
+#[test]
+fn monitor_collect_events_returns_bounded_batch() {
+    let platform = StubMonitorPlatform::new(vec![Some("a"), Some("b"), Some("c")]);
+    let monitor = CaptureMonitor::new(platform);
+
+    let batch = monitor.collect_events(2);
+
+    assert_eq!(batch, vec!["a".to_string(), "b".to_string()]);
+    assert_eq!(monitor.next_event(), Some("c".to_string()));
+}
+
+#[test]
 fn capture_metrics_aggregates_latency_and_status_by_method() {
     let mut metrics = CaptureMetrics::default();
 

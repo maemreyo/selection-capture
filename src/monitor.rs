@@ -17,6 +17,44 @@ where
     pub fn next_event(&self) -> Option<String> {
         self.platform.next_selection_change()
     }
+
+    pub fn run<F>(&self, mut on_event: F) -> usize
+    where
+        F: FnMut(String),
+    {
+        let mut processed = 0;
+        while let Some(event) = self.next_event() {
+            on_event(event);
+            processed += 1;
+        }
+        processed
+    }
+
+    pub fn run_with_limit<F>(&self, max_events: usize, mut on_event: F) -> usize
+    where
+        F: FnMut(String),
+    {
+        if max_events == 0 {
+            return 0;
+        }
+        let mut processed = 0;
+        while processed < max_events {
+            match self.next_event() {
+                Some(event) => {
+                    on_event(event);
+                    processed += 1;
+                }
+                None => break,
+            }
+        }
+        processed
+    }
+
+    pub fn collect_events(&self, max_events: usize) -> Vec<String> {
+        let mut events = Vec::new();
+        self.run_with_limit(max_events, |event| events.push(event));
+        events
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

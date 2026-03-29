@@ -7,7 +7,8 @@ Monitoring support is currently an experimental, backend-agnostic scaffold.
 What exists today:
 
 - `MonitorPlatform` defines the minimal backend contract for selection-change polling.
-- `CaptureMonitor<P>` wraps a backend and exposes `next_event()`.
+- `CaptureMonitor<P>` wraps a backend and exposes `next_event()`, `run()`, `run_with_limit()`,
+  and `collect_events()` helpers for synchronous processing loops.
 - Integration coverage exists for ordered event delivery through a stub backend.
 
 What does not exist yet:
@@ -37,6 +38,13 @@ pub trait MonitorPlatform {
 
 pub struct CaptureMonitor<P> {
     // backend storage
+}
+
+impl<P: MonitorPlatform> CaptureMonitor<P> {
+    pub fn next_event(&self) -> Option<String>;
+    pub fn run<F: FnMut(String)>(&self, on_event: F) -> usize;
+    pub fn run_with_limit<F: FnMut(String)>(&self, max_events: usize, on_event: F) -> usize;
+    pub fn collect_events(&self, max_events: usize) -> Vec<String>;
 }
 ```
 
