@@ -382,9 +382,9 @@ mod tests {
             collect_trace: true,
             ..CaptureOptions::default()
         };
-        options.retry_policy.ax_text = vec![Duration::from_millis(0)];
-        options.retry_policy.ax_range = vec![Duration::from_millis(0)];
-        options.retry_policy.clipboard_borrow = vec![Duration::from_millis(0)];
+        options.retry_policy.primary_accessibility = vec![Duration::from_millis(0)];
+        options.retry_policy.range_accessibility = vec![Duration::from_millis(0)];
+        options.retry_policy.clipboard = vec![Duration::from_millis(0)];
         let out = capture(&platform, &store, &cancel, &[&adapter], &options);
         match out {
             CaptureOutcome::Success(success) => assert!(success.trace.is_some()),
@@ -445,22 +445,22 @@ mod tests {
             collect_trace: true,
             ..CaptureOptions::default()
         };
-        options.retry_policy.ax_text = vec![Duration::from_millis(0)];
-        options.retry_policy.ax_range = vec![Duration::from_millis(0)];
-        options.retry_policy.clipboard_borrow = vec![Duration::from_millis(0)];
+        options.retry_policy.primary_accessibility = vec![Duration::from_millis(0)];
+        options.retry_policy.range_accessibility = vec![Duration::from_millis(0)];
+        options.retry_policy.clipboard = vec![Duration::from_millis(0)];
         let out = capture(&platform, &store, &cancel, &[&adapter], &options);
         match out {
             CaptureOutcome::Success(success) => {
                 assert_eq!(success.text, "selected from clipboard");
-                assert_eq!(success.method, CaptureMethod::ClipboardBorrowAppleScript);
+                assert_eq!(success.method, CaptureMethod::ClipboardBorrow);
                 let trace = success.trace.expect("trace");
                 assert!(trace.events.iter().any(|event| matches!(
                     event,
-                    TraceEvent::MethodReturnedEmpty(CaptureMethod::AxSelectedText)
+                    TraceEvent::MethodReturnedEmpty(CaptureMethod::AccessibilityPrimary)
                 )));
                 assert!(trace.events.iter().any(|event| matches!(
                     event,
-                    TraceEvent::MethodSucceeded(CaptureMethod::ClipboardBorrowAppleScript)
+                    TraceEvent::MethodSucceeded(CaptureMethod::ClipboardBorrow)
                 )));
             }
             CaptureOutcome::Failure(_) => panic!("expected success"),

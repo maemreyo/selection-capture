@@ -98,10 +98,10 @@ impl CapturePlatform for MacOSPlatform {
     fn attempt(&self, method: CaptureMethod, _app: Option<&ActiveApp>) -> PlatformAttemptResult {
         self.reset_cleanup();
         match method {
-            CaptureMethod::AxSelectedText => self.attempt_ax_selected_text(),
-            CaptureMethod::AxSelectedTextRange => PlatformAttemptResult::Unavailable,
-            CaptureMethod::ClipboardBorrowAppleScript => self.attempt_clipboard_borrow(),
-            CaptureMethod::ClipboardBorrowCgEvent => PlatformAttemptResult::Unavailable,
+            CaptureMethod::AccessibilityPrimary => self.attempt_ax_selected_text(),
+            CaptureMethod::AccessibilityRange => PlatformAttemptResult::Unavailable,
+            CaptureMethod::ClipboardBorrow => self.attempt_clipboard_borrow(),
+            CaptureMethod::SyntheticCopy => PlatformAttemptResult::Unavailable,
         }
     }
 

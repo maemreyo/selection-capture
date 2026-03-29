@@ -9,10 +9,10 @@ pub struct ActiveApp {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CaptureMethod {
-    AxSelectedText,
-    AxSelectedTextRange,
-    ClipboardBorrowAppleScript,
-    ClipboardBorrowCgEvent,
+    AccessibilityPrimary,
+    AccessibilityRange,
+    ClipboardBorrow,
+    SyntheticCopy,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,18 +53,18 @@ pub enum UserHint {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RetryPolicy {
-    pub ax_text: Vec<Duration>,
-    pub ax_range: Vec<Duration>,
-    pub clipboard_borrow: Vec<Duration>,
+    pub primary_accessibility: Vec<Duration>,
+    pub range_accessibility: Vec<Duration>,
+    pub clipboard: Vec<Duration>,
     pub poll_interval: Duration,
 }
 
 impl Default for RetryPolicy {
     fn default() -> Self {
         Self {
-            ax_text: vec![Duration::from_millis(0), Duration::from_millis(60)],
-            ax_range: vec![Duration::from_millis(0)],
-            clipboard_borrow: vec![Duration::from_millis(120), Duration::from_millis(220)],
+            primary_accessibility: vec![Duration::from_millis(0), Duration::from_millis(60)],
+            range_accessibility: vec![Duration::from_millis(0)],
+            clipboard: vec![Duration::from_millis(120), Duration::from_millis(220)],
             poll_interval: Duration::from_millis(20),
         }
     }
@@ -185,36 +185,86 @@ impl PlatformAttemptResult {
 
 impl CaptureMethod {
     pub fn is_ax(self) -> bool {
-        matches!(self, Self::AxSelectedText | Self::AxSelectedTextRange)
+        matches!(self, Self::AccessibilityPrimary | Self::AccessibilityRange)
     }
 
     pub fn is_clipboard(self) -> bool {
-        matches!(
-            self,
-            Self::ClipboardBorrowAppleScript | Self::ClipboardBorrowCgEvent
-        )
+        matches!(self, Self::ClipboardBorrow | Self::SyntheticCopy)
     }
 
     pub fn retry_delays(self, policy: &RetryPolicy) -> &[Duration] {
         match self {
-            Self::AxSelectedText => &policy.ax_text,
-            Self::AxSelectedTextRange => &policy.ax_range,
-            Self::ClipboardBorrowAppleScript | Self::ClipboardBorrowCgEvent => {
-                &policy.clipboard_borrow
-            }
+            Self::AccessibilityPrimary => &policy.primary_accessibility,
+            Self::AccessibilityRange => &policy.range_accessibility,
+            Self::ClipboardBorrow | Self::SyntheticCopy => &policy.clipboard,
         }
     }
 }
 
 pub fn default_method_order(allow_clipboard_borrow: bool) -> Vec<CaptureMethod> {
     let mut methods = vec![
-        CaptureMethod::AxSelectedText,
-        CaptureMethod::AxSelectedTextRange,
+        CaptureMethod::AccessibilityPrimary,
+        CaptureMethod::AccessibilityRange,
     ];
     if allow_clipboard_borrow {
-        methods.push(CaptureMethod::ClipboardBorrowAppleScript);
+        methods.push(CaptureMethod::ClipboardBorrow);
     }
     methods
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_method_order_includes_clipboard_when_allowed() {
+        assert_eq!(
+            default_method_order(true),
+            vec![
+                CaptureMethod::AccessibilityPrimary,
+                CaptureMethod::AccessibilityRange,
+                CaptureMethod::ClipboardBorrow,
+            ]
+        );
+    }
+
+    #[test]
+    fn default_method_order_excludes_clipboard_when_disallowed() {
+        assert_eq!(
+            default_method_order(false),
+            vec![
+                CaptureMethod::AccessibilityPrimary,
+                CaptureMethod::AccessibilityRange,
+            ]
+        );
+    }
+
+    #[test]
+    fn retry_delays_use_platform_neutral_policy_fields() {
+        let policy = RetryPolicy {
+            primary_accessibility: vec![Duration::from_millis(1)],
+            range_accessibility: vec![Duration::from_millis(2)],
+            clipboard: vec![Duration::from_millis(3)],
+            poll_interval: Duration::from_millis(4),
+        };
+
+        assert_eq!(
+            CaptureMethod::AccessibilityPrimary.retry_delays(&policy),
+            &[Duration::from_millis(1)]
+        );
+        assert_eq!(
+            CaptureMethod::AccessibilityRange.retry_delays(&policy),
+            &[Duration::from_millis(2)]
+        );
+        assert_eq!(
+            CaptureMethod::ClipboardBorrow.retry_delays(&policy),
+            &[Duration::from_millis(3)]
+        );
+        assert_eq!(
+            CaptureMethod::SyntheticCopy.retry_delays(&policy),
+            &[Duration::from_millis(3)]
+        );
+    }
 }
 
 pub fn status_from_failure_kind(kind: FailureKind) -> CaptureStatus {
