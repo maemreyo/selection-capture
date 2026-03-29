@@ -157,6 +157,7 @@ let guard = MonitorSpamGuard {
     min_emit_interval: std::time::Duration::ZERO,
     min_emit_interval_same_text: std::time::Duration::from_millis(200),
     normalize_whitespace: true,
+    stable_polls_required: 2,
 };
 let _guarded = mac_monitor.poll_until_cancelled_guarded(
     std::time::Duration::from_millis(120),

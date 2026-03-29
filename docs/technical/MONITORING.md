@@ -85,6 +85,7 @@ pub struct MonitorSpamGuard {
     pub min_emit_interval: Duration,
     pub min_emit_interval_same_text: Duration,
     pub normalize_whitespace: bool,
+    pub stable_polls_required: usize,
 }
 ```
 
@@ -111,3 +112,4 @@ adaptation, or cancellation. That work is intentionally deferred until native ho
 - macOS implementation is polling-based, not callback-based (`AXObserver`) yet
 - Coalescing mode intentionally drops events inside the emit interval window
 - Guarded mode intentionally suppresses events based on configured duplicate/interval policy
+- `stable_polls_required` drops transient/flicker updates until the same value is observed enough polls

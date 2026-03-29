@@ -13,6 +13,7 @@ pub struct MonitorSpamGuard {
     pub min_emit_interval: Duration,
     pub min_emit_interval_same_text: Duration,
     pub normalize_whitespace: bool,
+    pub stable_polls_required: usize,
 }
 
 impl Default for MonitorSpamGuard {
@@ -22,6 +23,7 @@ impl Default for MonitorSpamGuard {
             min_emit_interval: Duration::ZERO,
             min_emit_interval_same_text: Duration::ZERO,
             normalize_whitespace: false,
+            stable_polls_required: 1,
         }
     }
 }
@@ -157,10 +159,27 @@ where
         let mut processed = 0;
         let mut last_emit_at: Option<Instant> = None;
         let mut last_emitted_text: Option<String> = None;
+        let mut candidate_text: Option<String> = None;
+        let mut candidate_count = 0usize;
+        let stable_required = guard.stable_polls_required.max(1);
 
         while !cancel.is_cancelled() {
             if let Some(event) = self.next_event() {
                 let normalized = normalize_event_text(&event, guard.normalize_whitespace);
+                match candidate_text.as_ref() {
+                    Some(prev) if prev == &normalized => {
+                        candidate_count += 1;
+                    }
+                    _ => {
+                        candidate_text = Some(normalized.clone());
+                        candidate_count = 1;
+                    }
+                }
+
+                if candidate_count < stable_required {
+                    continue;
+                }
+
                 let now = Instant::now();
                 let too_soon_global = last_emit_at
                     .map(|last| now.duration_since(last) < guard.min_emit_interval)

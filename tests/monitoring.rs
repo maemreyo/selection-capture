@@ -201,6 +201,7 @@ fn monitor_poll_until_cancelled_guarded_can_enforce_global_emit_interval() {
         min_emit_interval: Duration::from_secs(60),
         min_emit_interval_same_text: Duration::ZERO,
         normalize_whitespace: false,
+        stable_polls_required: 1,
     };
 
     let processed =
@@ -241,6 +242,49 @@ fn monitor_poll_until_cancelled_guarded_can_normalize_whitespace_for_dedup() {
             "hello   world  again".to_string()
         ]
     );
+}
+
+#[test]
+fn monitor_poll_until_cancelled_guarded_requires_stable_polls_before_emit() {
+    let platform = StubMonitorPlatform::new(vec![Some("temp"), Some("final"), Some("final"), None]);
+    let monitor = CaptureMonitor::new(platform);
+    let cancel = LoopCancelSignal::new(8);
+    let mut observed = Vec::new();
+    let guard = MonitorSpamGuard {
+        stable_polls_required: 2,
+        suppress_identical: true,
+        min_emit_interval: Duration::ZERO,
+        min_emit_interval_same_text: Duration::ZERO,
+        normalize_whitespace: false,
+    };
+
+    let processed =
+        monitor.poll_until_cancelled_guarded(Duration::ZERO, &cancel, &guard, |event| {
+            observed.push(event)
+        });
+
+    assert_eq!(processed, 1);
+    assert_eq!(observed, vec!["final".to_string()]);
+}
+
+#[test]
+fn monitor_poll_until_cancelled_guarded_ignores_flicker_when_not_stable() {
+    let platform = StubMonitorPlatform::new(vec![Some("a"), Some("b"), Some("a"), None]);
+    let monitor = CaptureMonitor::new(platform);
+    let cancel = LoopCancelSignal::new(8);
+    let mut observed = Vec::new();
+    let guard = MonitorSpamGuard {
+        stable_polls_required: 2,
+        ..MonitorSpamGuard::default()
+    };
+
+    let processed =
+        monitor.poll_until_cancelled_guarded(Duration::ZERO, &cancel, &guard, |event| {
+            observed.push(event)
+        });
+
+    assert_eq!(processed, 0);
+    assert!(observed.is_empty());
 }
 
 #[test]
