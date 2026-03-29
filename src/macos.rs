@@ -18,6 +18,8 @@ pub struct MacOSPlatform {
 pub struct MacOSSelectionMonitor {
     last_emitted: Mutex<Option<String>>,
     native_event_queue: Mutex<VecDeque<String>>,
+    native_events_dropped: Mutex<u64>,
+    native_queue_capacity: usize,
     pub poll_interval: Duration,
     backend: MacOSMonitorBackend,
     native_observer_active: bool,
@@ -33,6 +35,7 @@ pub enum MacOSMonitorBackend {
 pub struct MacOSSelectionMonitorOptions {
     pub poll_interval: Duration,
     pub backend: MacOSMonitorBackend,
+    pub native_queue_capacity: usize,
 }
 
 impl Default for MacOSPlatform {
@@ -52,6 +55,7 @@ impl Default for MacOSSelectionMonitorOptions {
         Self {
             poll_interval: Duration::from_millis(120),
             backend: MacOSMonitorBackend::Polling,
+            native_queue_capacity: 256,
         }
     }
 }
@@ -132,6 +136,7 @@ impl MacOSSelectionMonitor {
         Self::new_with_options(MacOSSelectionMonitorOptions {
             poll_interval,
             backend: MacOSMonitorBackend::Polling,
+            native_queue_capacity: 256,
         })
     }
 
@@ -144,6 +149,8 @@ impl MacOSSelectionMonitor {
         Self {
             last_emitted: Mutex::new(None),
             native_event_queue: Mutex::new(VecDeque::new()),
+            native_events_dropped: Mutex::new(0),
+            native_queue_capacity: options.native_queue_capacity.max(1),
             poll_interval: options.poll_interval,
             backend: options.backend,
             native_observer_active,
@@ -168,10 +175,47 @@ impl MacOSSelectionMonitor {
             return false;
         }
         if let Ok(mut queue) = self.native_event_queue.lock() {
+            if queue.back().map(|s| s == trimmed).unwrap_or(false) {
+                return false;
+            }
+            if queue.len() >= self.native_queue_capacity {
+                queue.pop_front();
+                if let Ok(mut dropped) = self.native_events_dropped.lock() {
+                    *dropped += 1;
+                }
+            }
             queue.push_back(trimmed.to_string());
             return true;
         }
         false
+    }
+
+    pub fn enqueue_native_selection_events<I, T>(&self, events: I) -> usize
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<String>,
+    {
+        let mut accepted = 0usize;
+        for event in events {
+            if self.enqueue_native_selection_event(event.into()) {
+                accepted += 1;
+            }
+        }
+        accepted
+    }
+
+    pub fn native_queue_depth(&self) -> usize {
+        self.native_event_queue
+            .lock()
+            .map(|queue| queue.len())
+            .unwrap_or(0)
+    }
+
+    pub fn native_events_dropped(&self) -> u64 {
+        self.native_events_dropped
+            .lock()
+            .map(|value| *value)
+            .unwrap_or(0)
     }
 
     fn next_selection_text(&self) -> Option<String> {
@@ -432,6 +476,7 @@ mod tests {
         let monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
             poll_interval: Duration::from_millis(75),
             backend: MacOSMonitorBackend::NativeObserverPreferred,
+            native_queue_capacity: 256,
         });
 
         assert_eq!(monitor.poll_interval, Duration::from_millis(75));
@@ -455,15 +500,48 @@ mod tests {
         let mut monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
             poll_interval: Duration::from_millis(75),
             backend: MacOSMonitorBackend::NativeObserverPreferred,
+            native_queue_capacity: 256,
         });
         monitor.native_observer_active = true;
 
         assert!(monitor.enqueue_native_selection_event("first"));
-        assert!(monitor.enqueue_native_selection_event("first"));
+        assert!(!monitor.enqueue_native_selection_event("first"));
         assert!(monitor.enqueue_native_selection_event("second"));
 
         assert_eq!(monitor.next_selection_text(), Some("first".to_string()));
-        assert_eq!(monitor.next_selection_text(), None);
         assert_eq!(monitor.next_selection_text(), Some("second".to_string()));
+        assert_eq!(monitor.next_selection_text(), None);
+    }
+
+    #[test]
+    fn selection_monitor_native_queue_applies_capacity_and_tracks_drops() {
+        let monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(50),
+            backend: MacOSMonitorBackend::Polling,
+            native_queue_capacity: 2,
+        });
+
+        assert!(monitor.enqueue_native_selection_event("a"));
+        assert!(monitor.enqueue_native_selection_event("b"));
+        assert!(monitor.enqueue_native_selection_event("c"));
+
+        assert_eq!(monitor.native_queue_depth(), 2);
+        assert_eq!(monitor.native_events_dropped(), 1);
+    }
+
+    #[test]
+    fn selection_monitor_native_queue_batch_enqueue_counts_accepts() {
+        let monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(50),
+            backend: MacOSMonitorBackend::Polling,
+            native_queue_capacity: 4,
+        });
+
+        let accepted =
+            monitor.enqueue_native_selection_events(vec!["one", "one", " ", "two", "three"]);
+
+        assert_eq!(accepted, 3);
+        assert_eq!(monitor.native_queue_depth(), 3);
+        assert_eq!(monitor.native_events_dropped(), 0);
     }
 }

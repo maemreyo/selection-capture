@@ -148,6 +148,7 @@ let mac_monitor = CaptureMonitor::new(MacOSSelectionMonitor::default());
 let _native_pref = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
     poll_interval: std::time::Duration::from_millis(120),
     backend: MacOSMonitorBackend::NativeObserverPreferred,
+    native_queue_capacity: 256,
 });
 let _ = _native_pref.enqueue_native_selection_event("hello from observer");
 let cancel = StopImmediately;
