@@ -33,11 +33,17 @@ What exists today:
 - `native_observer_stats()` exposes lightweight lifecycle counters (attach attempts/success/fail
   and skipped same-PID retries) for production diagnostics.
 - `WindowsSelectionMonitor` (`windows-beta`) provides a Windows polling backend with
-  de-duplication using UI Automation/Legacy IAccessible selection reads.
+  de-duplication using UI Automation/Legacy IAccessible selection reads, plus a
+  native-event-preferred scaffold mode (`WindowsMonitorBackend::NativeEventPreferred`) with a
+  bounded native queue and optional event pump hook (`WindowsNativeEventPump`).
 - `LinuxSelectionMonitor` (`linux-alpha`) provides a Linux polling backend with de-duplication
-  using AT-SPI and primary-selection fallbacks.
+  using AT-SPI and primary-selection fallbacks, plus a native-event-preferred scaffold mode
+  (`LinuxMonitorBackend::NativeEventPreferred`) with a bounded native queue and optional event
+  pump hook (`LinuxNativeEventPump`).
 - Integration coverage exists for ordered event delivery and monitor loop behavior through a stub
   backend.
+- Feature-gated monitoring parity tests now validate that pump-fed native queues and manual
+  queue-fed fallback paths emit equivalent event streams for Windows/Linux monitor scaffolds.
 
 What does not exist yet:
 
@@ -135,7 +141,8 @@ Future backends are expected to plug into `MonitorPlatform` without changing the
 - Linux: AT-SPI event listeners and toolkit-specific selection change hooks
 
 Those platform backends may later require richer event metadata, blocking behavior, async
-adaptation, or cancellation. That work is intentionally deferred until native hooks exist.
+adaptation, or cancellation. Full OS-level subscriptions (`IUIAutomationEventHandler`,
+AT-SPI listeners) are still pending beyond the current queue-and-pump scaffolds.
 
 ## Known Limitations
 

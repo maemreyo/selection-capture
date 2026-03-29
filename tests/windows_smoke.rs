@@ -3,7 +3,7 @@
 use selection_capture::{
     capture, ActiveApp, AppAdapter, AppProfile, AppProfileStore, AppProfileUpdate, CancelSignal,
     CaptureFailureContext, CaptureMethod, CaptureOptions, CaptureOutcome, CapturePlatform,
-    CleanupStatus, PlatformAttemptResult, UserHint,
+    CleanupStatus, PlatformAttemptResult, TraceEvent, UserHint,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -50,15 +50,22 @@ struct StubPlatform {
 }
 
 impl StubPlatform {
-    fn new(responses: Vec<PlatformAttemptResult>) -> Self {
+    fn with_app_and_responses(app: ActiveApp, responses: Vec<PlatformAttemptResult>) -> Self {
         Self {
-            app: Some(ActiveApp {
-                bundle_id: "com.example.windows".into(),
-                name: "Windows Test App".into(),
-            }),
+            app: Some(app),
             responses: Arc::new(Mutex::new(responses)),
             cleanup: CleanupStatus::Clean,
         }
+    }
+
+    fn new(responses: Vec<PlatformAttemptResult>) -> Self {
+        Self::with_app_and_responses(
+            ActiveApp {
+                bundle_id: "com.example.windows".into(),
+                name: "Windows Test App".into(),
+            },
+            responses,
+        )
     }
 }
 
@@ -92,6 +99,33 @@ fn smoke_options() -> CaptureOptions {
     options
 }
 
+fn assert_capture_success(
+    out: CaptureOutcome,
+    expected_method: CaptureMethod,
+    expected_text: &str,
+    expected_started_methods: &[CaptureMethod],
+) {
+    match out {
+        CaptureOutcome::Success(success) => {
+            assert_eq!(success.method, expected_method);
+            assert_eq!(success.text, expected_text);
+            let trace = success.trace.expect("trace should be collected");
+            let started_methods: Vec<_> = trace
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    TraceEvent::MethodStarted(method) => Some(*method),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(started_methods, expected_started_methods);
+        }
+        CaptureOutcome::Failure(failure) => {
+            panic!("expected success, got {:?}", failure.status);
+        }
+    }
+}
+
 #[test]
 fn windows_beta_falls_back_from_ax_to_clipboard() {
     let platform = StubPlatform::new(vec![
@@ -105,15 +139,16 @@ fn windows_beta_falls_back_from_ax_to_clipboard() {
 
     let out = capture(&platform, &store, &cancel, &[&adapter], &smoke_options());
 
-    match out {
-        CaptureOutcome::Success(success) => {
-            assert_eq!(success.method, CaptureMethod::ClipboardBorrow);
-            assert_eq!(success.text, "clipboard capture");
-        }
-        CaptureOutcome::Failure(failure) => {
-            panic!("expected success, got {:?}", failure.status);
-        }
-    }
+    assert_capture_success(
+        out,
+        CaptureMethod::ClipboardBorrow,
+        "clipboard capture",
+        &[
+            CaptureMethod::AccessibilityPrimary,
+            CaptureMethod::AccessibilityRange,
+            CaptureMethod::ClipboardBorrow,
+        ],
+    );
 }
 
 #[test]
@@ -133,13 +168,113 @@ fn windows_beta_respects_strategy_override_order() {
 
     let out = capture(&platform, &store, &cancel, &[&adapter], &options);
 
-    match out {
-        CaptureOutcome::Success(success) => {
-            assert_eq!(success.method, CaptureMethod::SyntheticCopy);
-            assert_eq!(success.text, "synthetic copy capture");
-        }
-        CaptureOutcome::Failure(failure) => {
-            panic!("expected success, got {:?}", failure.status);
-        }
+    assert_capture_success(
+        out,
+        CaptureMethod::SyntheticCopy,
+        "synthetic copy capture",
+        &[
+            CaptureMethod::AccessibilityPrimary,
+            CaptureMethod::SyntheticCopy,
+        ],
+    );
+}
+
+#[test]
+fn windows_beta_app_compatibility_matrix_paths() {
+    struct Case {
+        app: ActiveApp,
+        strategy_override: Option<Vec<CaptureMethod>>,
+        responses: Vec<PlatformAttemptResult>,
+        expected_method: CaptureMethod,
+        expected_text: &'static str,
+        expected_started_methods: Vec<CaptureMethod>,
+    }
+
+    let cases = vec![
+        Case {
+            app: ActiveApp {
+                bundle_id: "process://msedge".into(),
+                name: "Microsoft Edge".into(),
+            },
+            strategy_override: None,
+            responses: vec![PlatformAttemptResult::Success("edge selected text".into())],
+            expected_method: CaptureMethod::AccessibilityPrimary,
+            expected_text: "edge selected text",
+            expected_started_methods: vec![CaptureMethod::AccessibilityPrimary],
+        },
+        Case {
+            app: ActiveApp {
+                bundle_id: "process://chrome".into(),
+                name: "Google Chrome".into(),
+            },
+            strategy_override: None,
+            responses: vec![
+                PlatformAttemptResult::Unavailable,
+                PlatformAttemptResult::Success("chrome legacy text".into()),
+            ],
+            expected_method: CaptureMethod::AccessibilityRange,
+            expected_text: "chrome legacy text",
+            expected_started_methods: vec![
+                CaptureMethod::AccessibilityPrimary,
+                CaptureMethod::AccessibilityRange,
+            ],
+        },
+        Case {
+            app: ActiveApp {
+                bundle_id: "process://code".into(),
+                name: "Visual Studio Code".into(),
+            },
+            strategy_override: None,
+            responses: vec![
+                PlatformAttemptResult::EmptySelection,
+                PlatformAttemptResult::Unavailable,
+                PlatformAttemptResult::Success("vscode clipboard text".into()),
+            ],
+            expected_method: CaptureMethod::ClipboardBorrow,
+            expected_text: "vscode clipboard text",
+            expected_started_methods: vec![
+                CaptureMethod::AccessibilityPrimary,
+                CaptureMethod::AccessibilityRange,
+                CaptureMethod::ClipboardBorrow,
+            ],
+        },
+        Case {
+            app: ActiveApp {
+                bundle_id: "process://winword".into(),
+                name: "Microsoft Word".into(),
+            },
+            strategy_override: Some(vec![
+                CaptureMethod::AccessibilityPrimary,
+                CaptureMethod::SyntheticCopy,
+            ]),
+            responses: vec![
+                PlatformAttemptResult::Unavailable,
+                PlatformAttemptResult::Success("word synthetic copy text".into()),
+            ],
+            expected_method: CaptureMethod::SyntheticCopy,
+            expected_text: "word synthetic copy text",
+            expected_started_methods: vec![
+                CaptureMethod::AccessibilityPrimary,
+                CaptureMethod::SyntheticCopy,
+            ],
+        },
+    ];
+
+    let store = StubStore;
+    let cancel = NeverCancel;
+    let adapter = NoAdapters;
+
+    for case in cases {
+        let platform = StubPlatform::with_app_and_responses(case.app, case.responses);
+        let mut options = smoke_options();
+        options.strategy_override = case.strategy_override;
+
+        let out = capture(&platform, &store, &cancel, &[&adapter], &options);
+        assert_capture_success(
+            out,
+            case.expected_method,
+            case.expected_text,
+            &case.expected_started_methods,
+        );
     }
 }

@@ -3,6 +3,12 @@ use selection_capture::{
     CaptureMonitor, CaptureOutcome, CaptureStatus, CaptureSuccess, CaptureTrace, CleanupStatus,
     FailureKind, MonitorPlatform, MonitorSpamGuard, TraceEvent,
 };
+#[cfg(feature = "linux-alpha")]
+use selection_capture::{LinuxMonitorBackend, LinuxSelectionMonitor, LinuxSelectionMonitorOptions};
+#[cfg(feature = "windows-beta")]
+use selection_capture::{
+    WindowsMonitorBackend, WindowsSelectionMonitor, WindowsSelectionMonitorOptions,
+};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -402,4 +408,65 @@ fn capture_metrics_aggregates_latency_and_status_by_method() {
     assert_eq!(clipboard.failures, 1);
     assert_eq!(clipboard.empty_results, 0);
     assert_eq!(clipboard.total_latency, Duration::from_millis(80));
+}
+
+#[cfg(feature = "windows-beta")]
+#[test]
+fn windows_monitor_native_pump_matches_manual_native_queue_path() {
+    fn pump() -> Vec<String> {
+        vec!["win a".to_string(), "win b".to_string()]
+    }
+
+    let from_pump = WindowsSelectionMonitor::new_with_options(WindowsSelectionMonitorOptions {
+        poll_interval: Duration::ZERO,
+        backend: WindowsMonitorBackend::NativeEventPreferred,
+        native_queue_capacity: 8,
+        native_event_pump: Some(pump),
+    });
+    let from_manual = WindowsSelectionMonitor::new_with_options(WindowsSelectionMonitorOptions {
+        poll_interval: Duration::ZERO,
+        backend: WindowsMonitorBackend::NativeEventPreferred,
+        native_queue_capacity: 8,
+        native_event_pump: None,
+    });
+    let _ =
+        from_manual.enqueue_native_selection_events(vec!["win a".to_string(), "win b".to_string()]);
+
+    let pump_events = CaptureMonitor::new(from_pump).collect_events(2);
+    let manual_events = CaptureMonitor::new(from_manual).collect_events(2);
+
+    assert_eq!(pump_events, manual_events);
+    assert_eq!(pump_events, vec!["win a".to_string(), "win b".to_string()]);
+}
+
+#[cfg(feature = "linux-alpha")]
+#[test]
+fn linux_monitor_native_pump_matches_manual_native_queue_path() {
+    fn pump() -> Vec<String> {
+        vec!["linux a".to_string(), "linux b".to_string()]
+    }
+
+    let from_pump = LinuxSelectionMonitor::new_with_options(LinuxSelectionMonitorOptions {
+        poll_interval: Duration::ZERO,
+        backend: LinuxMonitorBackend::NativeEventPreferred,
+        native_queue_capacity: 8,
+        native_event_pump: Some(pump),
+    });
+    let from_manual = LinuxSelectionMonitor::new_with_options(LinuxSelectionMonitorOptions {
+        poll_interval: Duration::ZERO,
+        backend: LinuxMonitorBackend::NativeEventPreferred,
+        native_queue_capacity: 8,
+        native_event_pump: None,
+    });
+    let _ = from_manual
+        .enqueue_native_selection_events(vec!["linux a".to_string(), "linux b".to_string()]);
+
+    let pump_events = CaptureMonitor::new(from_pump).collect_events(2);
+    let manual_events = CaptureMonitor::new(from_manual).collect_events(2);
+
+    assert_eq!(pump_events, manual_events);
+    assert_eq!(
+        pump_events,
+        vec!["linux a".to_string(), "linux b".to_string()]
+    );
 }

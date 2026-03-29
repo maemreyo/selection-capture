@@ -1,6 +1,6 @@
 # Makefile for selection-capture
 
-.PHONY: help build test check fmt clippy clean docs run-examples release install-tools setup-release windows-beta-smoke linux-alpha-smoke
+.PHONY: help build test check fmt clippy clean docs run-examples release install-tools setup-release windows-beta-smoke linux-alpha-smoke bench-regression
 
 # Default target
 .DEFAULT_GOAL := help
@@ -101,6 +101,10 @@ example-%: ## Run a specific example (e.g., make example-simple)
 
 bench: ## Run benchmarks
 	cargo bench
+
+bench-regression: ## Run benchmark regression guardrails
+	cargo bench --bench capture_latency -- --noplot
+	python3 scripts/check_bench_regression.py
 
 coverage: ## Generate code coverage report
 	cargo install cargo-tarpaulin

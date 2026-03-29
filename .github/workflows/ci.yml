@@ -60,6 +60,8 @@ jobs:
         run: cargo test --features windows-beta --lib --verbose
       - name: Run windows smoke tests
         run: cargo test --features windows-beta --test windows_smoke --verbose
+      - name: Run monitoring parity tests
+        run: cargo test --features windows-beta --test monitoring --verbose
 
   # Build on Linux (cross-compilation check)
   build-linux:
@@ -84,6 +86,21 @@ jobs:
         run: cargo test --features linux-alpha --lib --verbose
       - name: Run linux smoke tests
         run: cargo test --features linux-alpha --test linux_smoke --verbose
+      - name: Run monitoring parity tests
+        run: cargo test --features linux-alpha --test monitoring --verbose
+
+  # Benchmark regression guard
+  perf-regression:
+    name: Perf Regression Guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run capture latency benchmark
+        run: cargo bench --bench capture_latency -- --noplot
+      - name: Check benchmark thresholds
+        run: python3 scripts/check_bench_regression.py
 
   # Security audit
   audit:

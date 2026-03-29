@@ -22,6 +22,7 @@ include = [
     "docs/technical/WINDOWS.md",
     "docs/technical/LINUX.md",
     "docs/technical/MONITORING.md",
+    "docs/technical/PERFORMANCE_BASELINE.md",
 ]
 
 [lib]

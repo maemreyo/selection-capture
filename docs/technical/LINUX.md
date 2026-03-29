@@ -18,10 +18,11 @@ What exists today:
 - AT-SPI primary path attempts focused-descendant text reads over the accessibility bus
   (`org.a11y.Bus` + `org.a11y.atspi.*` via `gdbus`).
 - Dispatch behavior and engine-level fallback behavior are covered by unit and smoke tests.
-
-What does not exist yet:
-
-- Real clipboard-backed synthetic copy flow
+- Linux command fallback now prioritizes Wayland/X11 tools based on session environment
+  (`WAYLAND_DISPLAY`, `DISPLAY`) while still retaining mixed-session fallback behavior.
+- `LinuxSelectionMonitor` supports polling (`LinuxMonitorBackend::Polling`) and a
+  native-event-preferred scaffold mode (`LinuxMonitorBackend::NativeEventPreferred`) with bounded
+  queueing and an optional event pump callback (`LinuxNativeEventPump`).
 
 ## Setup
 
@@ -60,6 +61,22 @@ Current `CaptureMethod` mapping in `LinuxPlatform`:
 - `ClipboardBorrow` -> Clipboard attempt
 - `SyntheticCopy` -> Clipboard attempt
 
+## Desktop Matrix Hardening
+
+`linux_smoke` includes a desktop-oriented compatibility matrix to keep fallback paths deterministic
+across representative Linux contexts:
+
+- GNOME-like path: `AccessibilityPrimary`
+- KDE-like path: `AccessibilityPrimary -> AccessibilityRange`
+- Wayland compositor-like path: `AccessibilityPrimary -> AccessibilityRange -> ClipboardBorrow`
+- X11-like override path: `AccessibilityPrimary -> SyntheticCopy`
+
+In addition, backend command plans are session-aware:
+
+- Wayland-only sessions prioritize `wl-paste` variants
+- X11-only sessions prioritize `xclip`/`xsel`
+- Mixed/unknown sessions keep multi-tool fallback ordering
+
 ## Known Limitations
 
 - Clipboard/primary-selection capture depends on host tools (`wl-paste`, `xclip`, `xsel`) being
@@ -70,7 +87,9 @@ Current `CaptureMethod` mapping in `LinuxPlatform`:
   restricted Wayland sessions or minimal desktop environments.
 - `AccessibilityRange` is mapped to primary-selection reads and may be unavailable on restricted
   Wayland/X11 sessions.
-- `SyntheticCopy` does not yet synthesize key input; it shares the clipboard dispatch slot.
+- `SyntheticCopy` currently shares the clipboard dispatch slot (no Linux key-synthesis path yet).
+- Native-event-preferred monitor mode currently depends on caller-provided pump callbacks;
+  direct AT-SPI listener subscription wiring is not yet implemented.
 - There is no Linux-specific cleanup behavior yet.
 - There is no Linux permission, accessibility bus, display-server, or capability detection yet.
 - The alpha surface is suitable for engine integration and limited local capture experiments.

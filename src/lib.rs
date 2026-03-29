@@ -24,7 +24,10 @@ pub use ax_observer::{
 };
 pub use engine::{capture, try_capture};
 #[cfg(feature = "linux-alpha")]
-pub use linux::{LinuxPlatform, LinuxSelectionMonitor};
+pub use linux::{
+    LinuxMonitorBackend, LinuxNativeEventPump, LinuxPlatform, LinuxSelectionMonitor,
+    LinuxSelectionMonitorOptions,
+};
 #[cfg(target_os = "macos")]
 pub use macos::{
     MacOSMonitorBackend, MacOSNativeEventPump, MacOSNativeEventSource, MacOSNativeObserverStats,
@@ -42,4 +45,7 @@ pub use types::{
     PlatformAttemptResult, RetryPolicy, TraceEvent, UserHint, WouldBlock,
 };
 #[cfg(feature = "windows-beta")]
-pub use windows::{WindowsPlatform, WindowsSelectionMonitor};
+pub use windows::{
+    WindowsMonitorBackend, WindowsNativeEventPump, WindowsPlatform, WindowsSelectionMonitor,
+    WindowsSelectionMonitorOptions,
+};

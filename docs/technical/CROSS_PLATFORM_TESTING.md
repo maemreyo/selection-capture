@@ -67,6 +67,10 @@ Windows and Linux smoke tests follow the same pattern:
 - feed deterministic `PlatformAttemptResult` sequences into the engine
 - verify fallback ordering across accessibility and clipboard methods
 - verify `strategy_override` takes precedence over default method order
+- on Windows, also validate an app-oriented compatibility matrix (Edge/Chrome/VS Code/Office-like
+  capture paths)
+- on Linux, also validate a desktop-oriented compatibility matrix (GNOME/KDE/Wayland/X11-like
+  capture paths)
 
 These tests do not try to exercise native APIs. Their purpose is to keep the engine contract stable
 while native backend coverage remains partial and platform-dependent.

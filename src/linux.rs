@@ -1,5 +1,8 @@
 use crate::traits::{CapturePlatform, MonitorPlatform};
 use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
+use std::collections::VecDeque;
+#[cfg(target_os = "linux")]
+use std::env;
 #[cfg(target_os = "linux")]
 use std::process::Command;
 use std::sync::Mutex;
@@ -10,8 +13,29 @@ pub struct LinuxPlatform;
 
 pub struct LinuxSelectionMonitor {
     last_emitted: Mutex<Option<String>>,
+    native_event_queue: Mutex<VecDeque<String>>,
+    native_events_dropped: Mutex<u64>,
+    native_queue_capacity: usize,
     pub poll_interval: Duration,
+    backend: LinuxMonitorBackend,
+    native_event_pump: Option<LinuxNativeEventPump>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinuxMonitorBackend {
+    Polling,
+    NativeEventPreferred,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct LinuxSelectionMonitorOptions {
+    pub poll_interval: Duration,
+    pub backend: LinuxMonitorBackend,
+    pub native_queue_capacity: usize,
+    pub native_event_pump: Option<LinuxNativeEventPump>,
+}
+
+pub type LinuxNativeEventPump = fn() -> Vec<String>;
 
 trait LinuxBackend {
     fn attempt_atspi(&self) -> PlatformAttemptResult;
@@ -21,6 +45,164 @@ trait LinuxBackend {
 
 #[derive(Debug, Default)]
 struct DefaultLinuxBackend;
+
+#[cfg(any(target_os = "linux", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LinuxSession {
+    wayland: bool,
+    x11: bool,
+}
+
+#[cfg(any(target_os = "linux", test))]
+#[derive(Clone, Copy)]
+struct LinuxCommandSpec {
+    program: &'static str,
+    args: &'static [&'static str],
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn detect_linux_session(wayland_display: Option<&str>, display: Option<&str>) -> LinuxSession {
+    LinuxSession {
+        wayland: wayland_display
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false),
+        x11: display
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false),
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn clipboard_command_plan(session: LinuxSession) -> &'static [LinuxCommandSpec] {
+    const WAYLAND_FIRST: [LinuxCommandSpec; 4] = [
+        LinuxCommandSpec {
+            program: "wl-paste",
+            args: &["--no-newline", "--type", "text"],
+        },
+        LinuxCommandSpec {
+            program: "wl-paste",
+            args: &["--no-newline"],
+        },
+        LinuxCommandSpec {
+            program: "xclip",
+            args: &["-o", "-selection", "clipboard"],
+        },
+        LinuxCommandSpec {
+            program: "xsel",
+            args: &["--clipboard", "--output"],
+        },
+    ];
+    const X11_FIRST: [LinuxCommandSpec; 4] = [
+        LinuxCommandSpec {
+            program: "xclip",
+            args: &["-o", "-selection", "clipboard"],
+        },
+        LinuxCommandSpec {
+            program: "xsel",
+            args: &["--clipboard", "--output"],
+        },
+        LinuxCommandSpec {
+            program: "wl-paste",
+            args: &["--no-newline", "--type", "text"],
+        },
+        LinuxCommandSpec {
+            program: "wl-paste",
+            args: &["--no-newline"],
+        },
+    ];
+    const MIXED_DEFAULT: [LinuxCommandSpec; 4] = [
+        LinuxCommandSpec {
+            program: "wl-paste",
+            args: &["--no-newline", "--type", "text"],
+        },
+        LinuxCommandSpec {
+            program: "xclip",
+            args: &["-o", "-selection", "clipboard"],
+        },
+        LinuxCommandSpec {
+            program: "xsel",
+            args: &["--clipboard", "--output"],
+        },
+        LinuxCommandSpec {
+            program: "wl-paste",
+            args: &["--no-newline"],
+        },
+    ];
+
+    if session.wayland && !session.x11 {
+        &WAYLAND_FIRST
+    } else if session.x11 && !session.wayland {
+        &X11_FIRST
+    } else {
+        &MIXED_DEFAULT
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn primary_selection_command_plan(session: LinuxSession) -> &'static [LinuxCommandSpec] {
+    const WAYLAND_FIRST: [LinuxCommandSpec; 4] = [
+        LinuxCommandSpec {
+            program: "wl-paste",
+            args: &["--primary", "--no-newline", "--type", "text"],
+        },
+        LinuxCommandSpec {
+            program: "wl-paste",
+            args: &["--primary", "--no-newline"],
+        },
+        LinuxCommandSpec {
+            program: "xclip",
+            args: &["-o", "-selection", "primary"],
+        },
+        LinuxCommandSpec {
+            program: "xsel",
+            args: &["--primary", "--output"],
+        },
+    ];
+    const X11_FIRST: [LinuxCommandSpec; 4] = [
+        LinuxCommandSpec {
+            program: "xclip",
+            args: &["-o", "-selection", "primary"],
+        },
+        LinuxCommandSpec {
+            program: "xsel",
+            args: &["--primary", "--output"],
+        },
+        LinuxCommandSpec {
+            program: "wl-paste",
+            args: &["--primary", "--no-newline", "--type", "text"],
+        },
+        LinuxCommandSpec {
+            program: "wl-paste",
+            args: &["--primary", "--no-newline"],
+        },
+    ];
+    const MIXED_DEFAULT: [LinuxCommandSpec; 4] = [
+        LinuxCommandSpec {
+            program: "wl-paste",
+            args: &["--primary", "--no-newline", "--type", "text"],
+        },
+        LinuxCommandSpec {
+            program: "xclip",
+            args: &["-o", "-selection", "primary"],
+        },
+        LinuxCommandSpec {
+            program: "xsel",
+            args: &["--primary", "--output"],
+        },
+        LinuxCommandSpec {
+            program: "wl-paste",
+            args: &["--primary", "--no-newline"],
+        },
+    ];
+
+    if session.wayland && !session.x11 {
+        &WAYLAND_FIRST
+    } else if session.x11 && !session.wayland {
+        &X11_FIRST
+    } else {
+        &MIXED_DEFAULT
+    }
+}
 
 impl LinuxBackend for DefaultLinuxBackend {
     fn attempt_atspi(&self) -> PlatformAttemptResult {
@@ -127,19 +309,114 @@ impl LinuxPlatform {
 
 impl Default for LinuxSelectionMonitor {
     fn default() -> Self {
-        Self::new(Duration::from_millis(120))
+        Self::new_with_options(LinuxSelectionMonitorOptions::default())
+    }
+}
+
+impl Default for LinuxSelectionMonitorOptions {
+    fn default() -> Self {
+        Self {
+            poll_interval: Duration::from_millis(120),
+            backend: LinuxMonitorBackend::Polling,
+            native_queue_capacity: 256,
+            native_event_pump: None,
+        }
     }
 }
 
 impl LinuxSelectionMonitor {
     pub fn new(poll_interval: Duration) -> Self {
+        Self::new_with_options(LinuxSelectionMonitorOptions {
+            poll_interval,
+            backend: LinuxMonitorBackend::Polling,
+            native_queue_capacity: 256,
+            native_event_pump: None,
+        })
+    }
+
+    pub fn new_with_options(options: LinuxSelectionMonitorOptions) -> Self {
         Self {
             last_emitted: Mutex::new(None),
-            poll_interval,
+            native_event_queue: Mutex::new(VecDeque::new()),
+            native_events_dropped: Mutex::new(0),
+            native_queue_capacity: options.native_queue_capacity.max(1),
+            poll_interval: options.poll_interval,
+            backend: options.backend,
+            native_event_pump: options.native_event_pump,
         }
     }
 
+    pub fn backend(&self) -> LinuxMonitorBackend {
+        self.backend
+    }
+
+    pub fn enqueue_native_selection_event<T>(&self, text: T) -> bool
+    where
+        T: Into<String>,
+    {
+        let text = text.into();
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        if let Ok(mut queue) = self.native_event_queue.lock() {
+            if queue.back().map(|s| s == trimmed).unwrap_or(false) {
+                return false;
+            }
+            if queue.len() >= self.native_queue_capacity {
+                queue.pop_front();
+                if let Ok(mut dropped) = self.native_events_dropped.lock() {
+                    *dropped += 1;
+                }
+            }
+            queue.push_back(trimmed.to_string());
+            return true;
+        }
+        false
+    }
+
+    pub fn enqueue_native_selection_events<I, T>(&self, events: I) -> usize
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<String>,
+    {
+        let mut accepted = 0usize;
+        for event in events {
+            if self.enqueue_native_selection_event(event.into()) {
+                accepted += 1;
+            }
+        }
+        accepted
+    }
+
+    pub fn native_queue_depth(&self) -> usize {
+        self.native_event_queue
+            .lock()
+            .map(|queue| queue.len())
+            .unwrap_or(0)
+    }
+
+    pub fn native_events_dropped(&self) -> u64 {
+        self.native_events_dropped
+            .lock()
+            .map(|dropped| *dropped)
+            .unwrap_or(0)
+    }
+
+    pub fn poll_native_event_pump_once(&self) -> usize {
+        let Some(pump) = self.native_event_pump else {
+            return 0;
+        };
+        self.enqueue_native_selection_events(pump())
+    }
+
     fn next_selection_text(&self) -> Option<String> {
+        if matches!(self.backend, LinuxMonitorBackend::NativeEventPreferred) {
+            let _ = self.poll_native_event_pump_once();
+            if let Some(next) = self.native_event_queue.lock().ok()?.pop_front() {
+                return self.emit_if_new(next);
+            }
+        }
         let next = self.read_selection_text()?;
         self.emit_if_new(next)
     }
@@ -209,41 +486,38 @@ impl MonitorPlatform for LinuxSelectionMonitor {
 
 #[cfg(target_os = "linux")]
 fn read_clipboard_text() -> Result<Option<String>, String> {
-    try_linux_text_commands(&[
-        ("wl-paste", &["--no-newline", "--type", "text"][..]),
-        ("xclip", &["-o", "-selection", "clipboard"][..]),
-        ("xsel", &["--clipboard", "--output"][..]),
-    ])
+    let session = detect_linux_session(
+        env::var("WAYLAND_DISPLAY").ok().as_deref(),
+        env::var("DISPLAY").ok().as_deref(),
+    );
+    try_linux_text_commands(clipboard_command_plan(session))
 }
 
 #[cfg(target_os = "linux")]
 fn read_primary_selection_text() -> Result<Option<String>, String> {
-    try_linux_text_commands(&[
-        (
-            "wl-paste",
-            &["--primary", "--no-newline", "--type", "text"][..],
-        ),
-        ("xclip", &["-o", "-selection", "primary"][..]),
-        ("xsel", &["--primary", "--output"][..]),
-    ])
+    let session = detect_linux_session(
+        env::var("WAYLAND_DISPLAY").ok().as_deref(),
+        env::var("DISPLAY").ok().as_deref(),
+    );
+    try_linux_text_commands(primary_selection_command_plan(session))
 }
 
 #[cfg(target_os = "linux")]
-fn try_linux_text_commands(commands: &[(&str, &[&str])]) -> Result<Option<String>, String> {
+fn try_linux_text_commands(commands: &[LinuxCommandSpec]) -> Result<Option<String>, String> {
     let mut errors = Vec::new();
 
-    for (program, args) in commands {
-        let output = match Command::new(program).args(*args).output() {
+    for command in commands {
+        let output = match Command::new(command.program).args(command.args).output() {
             Ok(output) => output,
             Err(err) => {
-                errors.push(format!("{program}: {err}"));
+                errors.push(format!("{}: {err}", command.program));
                 continue;
             }
         };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            errors.push(format!("{program}: {stderr}"));
+            errors.push(format!("{}: {stderr}", command.program));
             continue;
         }
 
@@ -528,6 +802,7 @@ mod tests {
     fn selection_monitor_default_poll_interval_is_stable() {
         let monitor = LinuxSelectionMonitor::default();
         assert_eq!(monitor.poll_interval, Duration::from_millis(120));
+        assert_eq!(monitor.backend(), LinuxMonitorBackend::Polling);
     }
 
     #[test]
@@ -542,6 +817,53 @@ mod tests {
             monitor.emit_if_new("second".to_string()),
             Some("second".to_string())
         );
+    }
+
+    #[test]
+    fn selection_monitor_native_preferred_uses_event_pump_when_available() {
+        fn pump() -> Vec<String> {
+            vec![
+                "  native a ".to_string(),
+                "native a".to_string(),
+                "native b".to_string(),
+            ]
+        }
+
+        let monitor = LinuxSelectionMonitor::new_with_options(LinuxSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(10),
+            backend: LinuxMonitorBackend::NativeEventPreferred,
+            native_queue_capacity: 8,
+            native_event_pump: Some(pump),
+        });
+
+        assert_eq!(
+            monitor.next_selection_change(),
+            Some("native a".to_string())
+        );
+        assert_eq!(
+            monitor.next_selection_change(),
+            Some("native b".to_string())
+        );
+    }
+
+    #[test]
+    fn selection_monitor_native_preferred_applies_queue_capacity() {
+        let monitor = LinuxSelectionMonitor::new_with_options(LinuxSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(10),
+            backend: LinuxMonitorBackend::NativeEventPreferred,
+            native_queue_capacity: 2,
+            native_event_pump: None,
+        });
+        let accepted = monitor.enqueue_native_selection_events(vec![
+            "first".to_string(),
+            "second".to_string(),
+            "third".to_string(),
+        ]);
+        assert_eq!(accepted, 3);
+        assert_eq!(monitor.native_queue_depth(), 2);
+        assert_eq!(monitor.native_events_dropped(), 1);
+        assert_eq!(monitor.next_selection_change(), Some("second".to_string()));
+        assert_eq!(monitor.next_selection_change(), Some("third".to_string()));
     }
 
     #[test]
@@ -591,6 +913,67 @@ mod tests {
         assert_eq!(
             LinuxPlatform::dispatch_attempt(&backend, CaptureMethod::SyntheticCopy),
             PlatformAttemptResult::Success("clipboard".into())
+        );
+    }
+
+    #[test]
+    fn detects_linux_session_flags_from_env_presence() {
+        assert_eq!(
+            detect_linux_session(Some("wayland-0"), None),
+            LinuxSession {
+                wayland: true,
+                x11: false,
+            }
+        );
+        assert_eq!(
+            detect_linux_session(None, Some(":0")),
+            LinuxSession {
+                wayland: false,
+                x11: true,
+            }
+        );
+        assert_eq!(
+            detect_linux_session(Some(""), Some("")),
+            LinuxSession {
+                wayland: false,
+                x11: false,
+            }
+        );
+    }
+
+    #[test]
+    fn clipboard_plan_prioritizes_wayland_only_session() {
+        let plan = clipboard_command_plan(LinuxSession {
+            wayland: true,
+            x11: false,
+        });
+        assert_eq!(plan[0].program, "wl-paste");
+        assert_eq!(plan[1].program, "wl-paste");
+        assert_eq!(plan[0].args, &["--no-newline", "--type", "text"]);
+    }
+
+    #[test]
+    fn clipboard_plan_prioritizes_x11_only_session() {
+        let plan = clipboard_command_plan(LinuxSession {
+            wayland: false,
+            x11: true,
+        });
+        assert_eq!(plan[0].program, "xclip");
+        assert_eq!(plan[1].program, "xsel");
+        assert_eq!(plan[0].args, &["-o", "-selection", "clipboard"]);
+    }
+
+    #[test]
+    fn primary_selection_plan_prioritizes_wayland_only_session() {
+        let plan = primary_selection_command_plan(LinuxSession {
+            wayland: true,
+            x11: false,
+        });
+        assert_eq!(plan[0].program, "wl-paste");
+        assert_eq!(plan[1].program, "wl-paste");
+        assert_eq!(
+            plan[0].args,
+            &["--primary", "--no-newline", "--type", "text"]
         );
     }
 }

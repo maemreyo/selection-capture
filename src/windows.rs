@@ -1,5 +1,6 @@
 use crate::traits::{CapturePlatform, MonitorPlatform};
 use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
+use std::collections::VecDeque;
 #[cfg(target_os = "windows")]
 use std::process::Command;
 use std::sync::Mutex;
@@ -10,13 +11,35 @@ pub struct WindowsPlatform;
 
 pub struct WindowsSelectionMonitor {
     last_emitted: Mutex<Option<String>>,
+    native_event_queue: Mutex<VecDeque<String>>,
+    native_events_dropped: Mutex<u64>,
+    native_queue_capacity: usize,
     pub poll_interval: Duration,
+    backend: WindowsMonitorBackend,
+    native_event_pump: Option<WindowsNativeEventPump>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowsMonitorBackend {
+    Polling,
+    NativeEventPreferred,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct WindowsSelectionMonitorOptions {
+    pub poll_interval: Duration,
+    pub backend: WindowsMonitorBackend,
+    pub native_queue_capacity: usize,
+    pub native_event_pump: Option<WindowsNativeEventPump>,
+}
+
+pub type WindowsNativeEventPump = fn() -> Vec<String>;
 
 trait WindowsBackend {
     fn attempt_ui_automation(&self) -> PlatformAttemptResult;
     fn attempt_iaccessible(&self) -> PlatformAttemptResult;
     fn attempt_clipboard(&self) -> PlatformAttemptResult;
+    fn attempt_synthetic_copy(&self) -> PlatformAttemptResult;
 }
 
 #[derive(Debug, Default)]
@@ -88,6 +111,28 @@ impl WindowsBackend for DefaultWindowsBackend {
             PlatformAttemptResult::Unavailable
         }
     }
+
+    fn attempt_synthetic_copy(&self) -> PlatformAttemptResult {
+        #[cfg(target_os = "windows")]
+        {
+            match synthetic_copy_capture_text() {
+                Ok(Some(text)) => {
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        PlatformAttemptResult::EmptySelection
+                    } else {
+                        PlatformAttemptResult::Success(trimmed.to_string())
+                    }
+                }
+                Ok(None) => PlatformAttemptResult::EmptySelection,
+                Err(_) => PlatformAttemptResult::Unavailable,
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            PlatformAttemptResult::Unavailable
+        }
+    }
 }
 
 impl WindowsPlatform {
@@ -118,28 +163,122 @@ impl WindowsPlatform {
         match method {
             CaptureMethod::AccessibilityPrimary => backend.attempt_ui_automation(),
             CaptureMethod::AccessibilityRange => backend.attempt_iaccessible(),
-            CaptureMethod::ClipboardBorrow | CaptureMethod::SyntheticCopy => {
-                backend.attempt_clipboard()
-            }
+            CaptureMethod::ClipboardBorrow => backend.attempt_clipboard(),
+            CaptureMethod::SyntheticCopy => backend.attempt_synthetic_copy(),
         }
     }
 }
 
 impl Default for WindowsSelectionMonitor {
     fn default() -> Self {
-        Self::new(Duration::from_millis(120))
+        Self::new_with_options(WindowsSelectionMonitorOptions::default())
+    }
+}
+
+impl Default for WindowsSelectionMonitorOptions {
+    fn default() -> Self {
+        Self {
+            poll_interval: Duration::from_millis(120),
+            backend: WindowsMonitorBackend::Polling,
+            native_queue_capacity: 256,
+            native_event_pump: None,
+        }
     }
 }
 
 impl WindowsSelectionMonitor {
     pub fn new(poll_interval: Duration) -> Self {
+        Self::new_with_options(WindowsSelectionMonitorOptions {
+            poll_interval,
+            backend: WindowsMonitorBackend::Polling,
+            native_queue_capacity: 256,
+            native_event_pump: None,
+        })
+    }
+
+    pub fn new_with_options(options: WindowsSelectionMonitorOptions) -> Self {
         Self {
             last_emitted: Mutex::new(None),
-            poll_interval,
+            native_event_queue: Mutex::new(VecDeque::new()),
+            native_events_dropped: Mutex::new(0),
+            native_queue_capacity: options.native_queue_capacity.max(1),
+            poll_interval: options.poll_interval,
+            backend: options.backend,
+            native_event_pump: options.native_event_pump,
         }
     }
 
+    pub fn backend(&self) -> WindowsMonitorBackend {
+        self.backend
+    }
+
+    pub fn enqueue_native_selection_event<T>(&self, text: T) -> bool
+    where
+        T: Into<String>,
+    {
+        let text = text.into();
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        if let Ok(mut queue) = self.native_event_queue.lock() {
+            if queue.back().map(|s| s == trimmed).unwrap_or(false) {
+                return false;
+            }
+            if queue.len() >= self.native_queue_capacity {
+                queue.pop_front();
+                if let Ok(mut dropped) = self.native_events_dropped.lock() {
+                    *dropped += 1;
+                }
+            }
+            queue.push_back(trimmed.to_string());
+            return true;
+        }
+        false
+    }
+
+    pub fn enqueue_native_selection_events<I, T>(&self, events: I) -> usize
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<String>,
+    {
+        let mut accepted = 0usize;
+        for event in events {
+            if self.enqueue_native_selection_event(event.into()) {
+                accepted += 1;
+            }
+        }
+        accepted
+    }
+
+    pub fn native_queue_depth(&self) -> usize {
+        self.native_event_queue
+            .lock()
+            .map(|queue| queue.len())
+            .unwrap_or(0)
+    }
+
+    pub fn native_events_dropped(&self) -> u64 {
+        self.native_events_dropped
+            .lock()
+            .map(|dropped| *dropped)
+            .unwrap_or(0)
+    }
+
+    pub fn poll_native_event_pump_once(&self) -> usize {
+        let Some(pump) = self.native_event_pump else {
+            return 0;
+        };
+        self.enqueue_native_selection_events(pump())
+    }
+
     fn next_selection_text(&self) -> Option<String> {
+        if matches!(self.backend, WindowsMonitorBackend::NativeEventPreferred) {
+            let _ = self.poll_native_event_pump_once();
+            if let Some(next) = self.native_event_queue.lock().ok()?.pop_front() {
+                return self.emit_if_new(next);
+            }
+        }
         let next = self.read_selection_text()?;
         self.emit_if_new(next)
     }
@@ -265,6 +404,64 @@ if ($null -ne $valuePattern) {
     Write-Output $value
     return
   }
+}
+"#,
+        ])
+        .output()
+        .map_err(|err| err.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+    Ok(normalize_windows_text_stdout(&stdout))
+}
+
+#[cfg(target_os = "windows")]
+fn synthetic_copy_capture_text() -> Result<Option<String>, String> {
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-STA",
+            "-Command",
+            r#"
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class Win32 {
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetForegroundWindow();
+}
+"@
+$hwnd = [Win32]::GetForegroundWindow()
+if ($hwnd -eq [IntPtr]::Zero) { return }
+
+$original = $null
+$hasOriginal = $false
+try {
+  $original = Get-Clipboard -Raw -ErrorAction Stop
+  $hasOriginal = $true
+} catch {}
+
+[System.Windows.Forms.SendKeys]::SendWait("^c")
+Start-Sleep -Milliseconds 90
+
+$captured = $null
+try {
+  $captured = Get-Clipboard -Raw -ErrorAction Stop
+} catch {}
+
+if ($hasOriginal) {
+  try {
+    Set-Clipboard -Value $original
+  } catch {}
+}
+
+if ($null -ne $captured) {
+  Write-Output $captured
 }
 "#,
         ])
@@ -410,6 +607,7 @@ mod tests {
         ui_automation: PlatformAttemptResult,
         iaccessible: PlatformAttemptResult,
         clipboard: PlatformAttemptResult,
+        synthetic_copy: PlatformAttemptResult,
     }
 
     impl WindowsBackend for StubBackend {
@@ -424,6 +622,10 @@ mod tests {
         fn attempt_clipboard(&self) -> PlatformAttemptResult {
             self.clipboard.clone()
         }
+
+        fn attempt_synthetic_copy(&self) -> PlatformAttemptResult {
+            self.synthetic_copy.clone()
+        }
     }
 
     #[test]
@@ -436,6 +638,7 @@ mod tests {
     fn selection_monitor_default_poll_interval_is_stable() {
         let monitor = WindowsSelectionMonitor::default();
         assert_eq!(monitor.poll_interval, Duration::from_millis(120));
+        assert_eq!(monitor.backend(), WindowsMonitorBackend::Polling);
     }
 
     #[test]
@@ -453,6 +656,53 @@ mod tests {
     }
 
     #[test]
+    fn selection_monitor_native_preferred_uses_event_pump_when_available() {
+        fn pump() -> Vec<String> {
+            vec![
+                "  native a ".to_string(),
+                "native a".to_string(),
+                "native b".to_string(),
+            ]
+        }
+
+        let monitor = WindowsSelectionMonitor::new_with_options(WindowsSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(10),
+            backend: WindowsMonitorBackend::NativeEventPreferred,
+            native_queue_capacity: 8,
+            native_event_pump: Some(pump),
+        });
+
+        assert_eq!(
+            monitor.next_selection_change(),
+            Some("native a".to_string())
+        );
+        assert_eq!(
+            monitor.next_selection_change(),
+            Some("native b".to_string())
+        );
+    }
+
+    #[test]
+    fn selection_monitor_native_preferred_applies_queue_capacity() {
+        let monitor = WindowsSelectionMonitor::new_with_options(WindowsSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(10),
+            backend: WindowsMonitorBackend::NativeEventPreferred,
+            native_queue_capacity: 2,
+            native_event_pump: None,
+        });
+        let accepted = monitor.enqueue_native_selection_events(vec![
+            "first".to_string(),
+            "second".to_string(),
+            "third".to_string(),
+        ]);
+        assert_eq!(accepted, 3);
+        assert_eq!(monitor.native_queue_depth(), 2);
+        assert_eq!(monitor.native_events_dropped(), 1);
+        assert_eq!(monitor.next_selection_change(), Some("second".to_string()));
+        assert_eq!(monitor.next_selection_change(), Some("third".to_string()));
+    }
+
+    #[test]
     fn active_app_probe_does_not_panic() {
         let platform = WindowsPlatform::new();
         let _ = platform.active_app();
@@ -464,6 +714,7 @@ mod tests {
             ui_automation: PlatformAttemptResult::PermissionDenied,
             iaccessible: PlatformAttemptResult::Unavailable,
             clipboard: PlatformAttemptResult::Unavailable,
+            synthetic_copy: PlatformAttemptResult::Unavailable,
         };
 
         let result =
@@ -478,15 +729,27 @@ mod tests {
             ui_automation: PlatformAttemptResult::Unavailable,
             iaccessible: PlatformAttemptResult::Unavailable,
             clipboard: PlatformAttemptResult::Success("clipboard".into()),
+            synthetic_copy: PlatformAttemptResult::Success("synthetic".into()),
         };
 
         assert_eq!(
             WindowsPlatform::dispatch_attempt(&backend, CaptureMethod::ClipboardBorrow),
             PlatformAttemptResult::Success("clipboard".into())
         );
+    }
+
+    #[test]
+    fn dispatches_synthetic_copy_to_synthetic_copy_attempt() {
+        let backend = StubBackend {
+            ui_automation: PlatformAttemptResult::Unavailable,
+            iaccessible: PlatformAttemptResult::Unavailable,
+            clipboard: PlatformAttemptResult::Success("clipboard".into()),
+            synthetic_copy: PlatformAttemptResult::Success("synthetic".into()),
+        };
+
         assert_eq!(
             WindowsPlatform::dispatch_attempt(&backend, CaptureMethod::SyntheticCopy),
-            PlatformAttemptResult::Success("clipboard".into())
+            PlatformAttemptResult::Success("synthetic".into())
         );
     }
 

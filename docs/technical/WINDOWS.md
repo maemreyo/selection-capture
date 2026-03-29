@@ -16,11 +16,13 @@ What exists today:
 - UI Automation primary path uses PowerShell/.NET UIAutomation against the focused element
   (`TextPattern` first, `ValuePattern` fallback).
 - IAccessible range path uses `LegacyIAccessiblePattern` (`Value` first, `Name` fallback).
+- Synthetic copy path sends guarded `Ctrl+C`, reads clipboard, and restores prior clipboard text
+  when prior text content exists.
+- `WindowsSelectionMonitor` supports polling
+  (`WindowsMonitorBackend::Polling`) and a native-event-preferred scaffold mode
+  (`WindowsMonitorBackend::NativeEventPreferred`) with bounded queueing and an optional event
+  pump callback (`WindowsNativeEventPump`).
 - Fallback behavior is covered by unit and smoke tests.
-
-What does not exist yet:
-
-- Real synthetic copy flow (Ctrl+C + restore semantics)
 
 ## Setup
 
@@ -56,17 +58,27 @@ Current `CaptureMethod` mapping in `WindowsPlatform`:
 - `AccessibilityPrimary` -> UI Automation attempt
 - `AccessibilityRange` -> IAccessible attempt
 - `ClipboardBorrow` -> Clipboard attempt
-- `SyntheticCopy` -> Clipboard attempt
+- `SyntheticCopy` -> Synthetic copy attempt (`Ctrl+C` + clipboard read + best-effort restore)
+
+## Compatibility Smoke Matrix
+
+`windows_smoke` now validates app-oriented fallback semantics for representative desktop targets:
+
+- Edge-like path: `AccessibilityPrimary`
+- Chrome-like path: `AccessibilityPrimary -> AccessibilityRange`
+- VS Code-like path: `AccessibilityPrimary -> AccessibilityRange -> ClipboardBorrow`
+- Office-like path: `AccessibilityPrimary -> SyntheticCopy` (with strategy override)
 
 ## Known Limitations
 
-- Clipboard capture currently reads existing clipboard content and does not synthesize copy.
 - Active app detection depends on PowerShell/user32 lookup and may fail in restricted sessions.
 - UI Automation capture depends on the focused element exposing `TextPattern` or `ValuePattern`;
   many desktop apps still return empty values.
 - Legacy IAccessible capture depends on `LegacyIAccessiblePattern`; many apps do not expose useful
   value/name content for selected text.
-- `SyntheticCopy` does not yet synthesize key input; it currently shares clipboard dispatch.
+- Synthetic copy currently depends on foreground focus and SendKeys behavior from PowerShell STA.
+- Native-event-preferred monitor mode currently depends on caller-provided pump callbacks;
+  direct `IUIAutomationEventHandler` subscription wiring is not yet implemented.
 - There is no Windows-specific cleanup behavior yet.
 - There is no Windows permission or capability detection yet.
 - The beta surface is suitable for engine integration and incremental backend rollout.

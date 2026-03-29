@@ -191,8 +191,8 @@ let mut metrics = CaptureMetrics::default();
 
 Current limitations:
 
-- Monitoring backends are polling-based (no native observer callback integration yet)
-- macOS exposes a native-observer scaffold (`NativeObserverPreferred`) with a native-event queue and safe polling fallback
+- Native callback integration is fully wired on macOS; Windows/Linux expose native-event-preferred queue-and-pump scaffolds with polling fallback
+- macOS `NativeObserverPreferred` uses AXObserver callback ingress with a native-event queue and safe polling fallback
 - No async stream integration exists yet
 - `None` from backend is treated as "no more events" by `run(...)` APIs
 - For anti-spam behavior, prefer `poll_until_cancelled_guarded(...)` with `MonitorSpamGuard`
