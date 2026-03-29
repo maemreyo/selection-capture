@@ -1,5 +1,7 @@
 use crate::traits::CapturePlatform;
 use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
+#[cfg(target_os = "linux")]
+use std::process::Command;
 
 #[derive(Debug, Default)]
 pub struct LinuxPlatform;
@@ -19,11 +21,47 @@ impl LinuxBackend for DefaultLinuxBackend {
     }
 
     fn attempt_x11_selection(&self) -> PlatformAttemptResult {
-        PlatformAttemptResult::Unavailable
+        #[cfg(target_os = "linux")]
+        {
+            match read_primary_selection_text() {
+                Ok(Some(text)) => {
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        PlatformAttemptResult::EmptySelection
+                    } else {
+                        PlatformAttemptResult::Success(trimmed.to_string())
+                    }
+                }
+                Ok(None) => PlatformAttemptResult::EmptySelection,
+                Err(_) => PlatformAttemptResult::Unavailable,
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            PlatformAttemptResult::Unavailable
+        }
     }
 
     fn attempt_clipboard(&self) -> PlatformAttemptResult {
-        PlatformAttemptResult::Unavailable
+        #[cfg(target_os = "linux")]
+        {
+            match read_clipboard_text() {
+                Ok(Some(text)) => {
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        PlatformAttemptResult::EmptySelection
+                    } else {
+                        PlatformAttemptResult::Success(trimmed.to_string())
+                    }
+                }
+                Ok(None) => PlatformAttemptResult::EmptySelection,
+                Err(_) => PlatformAttemptResult::Unavailable,
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            PlatformAttemptResult::Unavailable
+        }
     }
 }
 
@@ -73,6 +111,64 @@ impl CapturePlatform for LinuxPlatform {
 
     fn cleanup(&self) -> CleanupStatus {
         CleanupStatus::Clean
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_clipboard_text() -> Result<Option<String>, String> {
+    try_linux_text_commands(&[
+        ("wl-paste", &["--no-newline", "--type", "text"][..]),
+        ("xclip", &["-o", "-selection", "clipboard"][..]),
+        ("xsel", &["--clipboard", "--output"][..]),
+    ])
+}
+
+#[cfg(target_os = "linux")]
+fn read_primary_selection_text() -> Result<Option<String>, String> {
+    try_linux_text_commands(&[
+        (
+            "wl-paste",
+            &["--primary", "--no-newline", "--type", "text"][..],
+        ),
+        ("xclip", &["-o", "-selection", "primary"][..]),
+        ("xsel", &["--primary", "--output"][..]),
+    ])
+}
+
+#[cfg(target_os = "linux")]
+fn try_linux_text_commands(commands: &[(&str, &[&str])]) -> Result<Option<String>, String> {
+    let mut errors = Vec::new();
+
+    for (program, args) in commands {
+        let output = match Command::new(program).args(*args).output() {
+            Ok(output) => output,
+            Err(err) => {
+                errors.push(format!("{program}: {err}"));
+                continue;
+            }
+        };
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            errors.push(format!("{program}: {stderr}"));
+            continue;
+        }
+
+        let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+        return Ok(normalize_linux_text_stdout(&stdout));
+    }
+
+    Err(errors.join("; "))
+}
+
+#[cfg(target_os = "linux")]
+fn normalize_linux_text_stdout(stdout: &str) -> Option<String> {
+    let text = stdout.replace("\r\n", "\n");
+    let normalized = text.trim_end_matches(['\r', '\n']);
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.to_string())
     }
 }
 

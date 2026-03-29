@@ -11,17 +11,17 @@ What exists today:
   - AT-SPI
   - X11 selection
   - Clipboard
-- The current backend safely returns `PlatformAttemptResult::Unavailable` until native
-  implementations are added.
+- Clipboard and primary-selection paths attempt real reads through host tooling:
+  - Wayland: `wl-paste`
+  - X11: `xclip` / `xsel`
+- AT-SPI path is still scaffolded and returns `PlatformAttemptResult::Unavailable`.
 - Dispatch behavior and engine-level fallback behavior are covered by unit and smoke tests.
 
 What does not exist yet:
 
 - Real AT-SPI capture
-- Real X11 primary-selection range capture
 - Real clipboard-backed synthetic copy flow
 - Active application discovery on Linux
-- Wayland-specific selection plumbing
 
 ## Setup
 
@@ -49,7 +49,7 @@ This MVP is intentionally narrow:
 - Prove feature-gated export and CI coverage
 - Prove capture-engine fallback semantics with Linux-oriented smoke tests
 - Keep the public dispatch surface aligned with planned Linux backends
-- Avoid shipping placeholder behavior that pretends to capture text
+- Limit "real capture" to shell-backed alpha paths while AT-SPI is unfinished
 
 ## Dispatch Mapping
 
@@ -62,9 +62,12 @@ Current `CaptureMethod` mapping in `LinuxPlatform`:
 
 ## Known Limitations
 
-- All Linux attempt methods currently return `Unavailable`.
-- `AccessibilityRange` is mapped to an X11-oriented slot; Wayland handling is not implemented.
+- Clipboard/primary-selection capture depends on host tools (`wl-paste`, `xclip`, `xsel`) being
+  installed and reachable in `PATH`.
+- `AccessibilityPrimary` (AT-SPI) still returns `Unavailable`.
+- `AccessibilityRange` is mapped to primary-selection reads and may be unavailable on restricted
+  Wayland/X11 sessions.
 - `SyntheticCopy` does not yet synthesize key input; it shares the clipboard dispatch slot.
 - There is no Linux-specific cleanup behavior yet.
 - There is no Linux permission, accessibility bus, display-server, or capability detection yet.
-- The alpha surface is suitable for engine integration and CI validation, not end-user capture.
+- The alpha surface is suitable for engine integration and limited local capture experiments.
