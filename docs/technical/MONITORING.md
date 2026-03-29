@@ -30,6 +30,8 @@ What exists today:
   briefly per polling tick to ingest callback-driven updates into the same bounded queue path.
 - During polling, native runtime now re-checks focused app PID and re-registers observer runtime
   when focus migrates to a different process.
+- `native_observer_stats()` exposes lightweight lifecycle counters (attach attempts/success/fail
+  and skipped same-PID retries) for production diagnostics.
 - `WindowsSelectionMonitor` (`windows-beta`) provides a Windows polling backend with
   de-duplication using UI Automation/Legacy IAccessible selection reads.
 - `LinuxSelectionMonitor` (`linux-alpha`) provides a Linux polling backend with de-duplication

@@ -177,6 +177,7 @@ let _guarded = mac_monitor.poll_until_cancelled_guarded(
     &guard,
     |text| println!("de-spammed selection: {text}"),
 );
+let _native_stats = _native_pref.native_observer_stats();
 let _stats = mac_monitor.poll_until_cancelled_guarded_with_stats(
     std::time::Duration::from_millis(120),
     &cancel,
