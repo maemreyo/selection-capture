@@ -1,10 +1,17 @@
-use crate::traits::CapturePlatform;
+use crate::traits::{CapturePlatform, MonitorPlatform};
 use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
 #[cfg(target_os = "linux")]
 use std::process::Command;
+use std::sync::Mutex;
+use std::time::Duration;
 
 #[derive(Debug, Default)]
 pub struct LinuxPlatform;
+
+pub struct LinuxSelectionMonitor {
+    last_emitted: Mutex<Option<String>>,
+    pub poll_interval: Duration,
+}
 
 trait LinuxBackend {
     fn attempt_atspi(&self) -> PlatformAttemptResult;
@@ -118,6 +125,61 @@ impl LinuxPlatform {
     }
 }
 
+impl Default for LinuxSelectionMonitor {
+    fn default() -> Self {
+        Self::new(Duration::from_millis(120))
+    }
+}
+
+impl LinuxSelectionMonitor {
+    pub fn new(poll_interval: Duration) -> Self {
+        Self {
+            last_emitted: Mutex::new(None),
+            poll_interval,
+        }
+    }
+
+    fn next_selection_text(&self) -> Option<String> {
+        let next = self.read_selection_text()?;
+        self.emit_if_new(next)
+    }
+
+    fn emit_if_new(&self, next: String) -> Option<String> {
+        let mut last = self.last_emitted.lock().ok()?;
+        if last.as_ref() == Some(&next) {
+            return None;
+        }
+        *last = Some(next.clone());
+        Some(next)
+    }
+
+    fn read_selection_text(&self) -> Option<String> {
+        #[cfg(target_os = "linux")]
+        {
+            let atspi = read_atspi_text().ok().flatten();
+            if let Some(next) = atspi {
+                let trimmed = next.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+
+            let primary = read_primary_selection_text().ok().flatten();
+            if let Some(next) = primary {
+                let trimmed = next.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+            None
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
+    }
+}
+
 impl CapturePlatform for LinuxPlatform {
     fn active_app(&self) -> Option<ActiveApp> {
         #[cfg(target_os = "linux")]
@@ -136,6 +198,12 @@ impl CapturePlatform for LinuxPlatform {
 
     fn cleanup(&self) -> CleanupStatus {
         CleanupStatus::Clean
+    }
+}
+
+impl MonitorPlatform for LinuxSelectionMonitor {
+    fn next_selection_change(&self) -> Option<String> {
+        self.next_selection_text()
     }
 }
 
@@ -454,6 +522,26 @@ mod tests {
     fn constructor_builds_stub_platform() {
         let platform = LinuxPlatform::new();
         let _ = platform;
+    }
+
+    #[test]
+    fn selection_monitor_default_poll_interval_is_stable() {
+        let monitor = LinuxSelectionMonitor::default();
+        assert_eq!(monitor.poll_interval, Duration::from_millis(120));
+    }
+
+    #[test]
+    fn selection_monitor_emits_only_new_values() {
+        let monitor = LinuxSelectionMonitor::new(Duration::from_millis(10));
+        assert_eq!(
+            monitor.emit_if_new("first".to_string()),
+            Some("first".to_string())
+        );
+        assert_eq!(monitor.emit_if_new("first".to_string()), None);
+        assert_eq!(
+            monitor.emit_if_new("second".to_string()),
+            Some("second".to_string())
+        );
     }
 
     #[test]

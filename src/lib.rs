@@ -18,7 +18,7 @@ mod windows;
 pub use async_api::capture_async;
 pub use engine::{capture, try_capture};
 #[cfg(feature = "linux-alpha")]
-pub use linux::LinuxPlatform;
+pub use linux::{LinuxPlatform, LinuxSelectionMonitor};
 #[cfg(target_os = "macos")]
 pub use macos::{MacOSPlatform, MacOSSelectionMonitor};
 pub use monitor::{CaptureMetrics, CaptureMonitor, MethodMetrics};
@@ -31,4 +31,4 @@ pub use types::{
     PlatformAttemptResult, RetryPolicy, TraceEvent, UserHint, WouldBlock,
 };
 #[cfg(feature = "windows-beta")]
-pub use windows::WindowsPlatform;
+pub use windows::{WindowsPlatform, WindowsSelectionMonitor};

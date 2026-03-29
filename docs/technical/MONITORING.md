@@ -12,12 +12,15 @@ What exists today:
   `poll_until_cancelled_coalesced()` helpers for synchronous processing loops.
 - `MacOSSelectionMonitor` provides a first-party macOS monitor backend (polling + de-duplication
   via AX selected-text reads).
-- Integration coverage exists for ordered event delivery through a stub backend.
+- `WindowsSelectionMonitor` (`windows-beta`) provides a Windows polling backend with
+  de-duplication using UI Automation/Legacy IAccessible selection reads.
+- `LinuxSelectionMonitor` (`linux-alpha`) provides a Linux polling backend with de-duplication
+  using AT-SPI and primary-selection fallbacks.
+- Integration coverage exists for ordered event delivery and monitor loop behavior through a stub
+  backend.
 
 What does not exist yet:
 
-- Built-in Windows monitoring hooks
-- Built-in Linux monitoring hooks
 - Async streams, channels, or subscription orchestration
 - Native observer/event-subscription lifecycle management
 - Debounce semantics (current coalescing support is interval-throttling)

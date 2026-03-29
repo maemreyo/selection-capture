@@ -32,9 +32,10 @@ with explicit capture status and trace metadata for app-level UX decisions.
 
 Experimental monitoring support is scaffolded with a generic `MonitorPlatform` trait plus
 `CaptureMonitor<P>`, and `CaptureMetrics` for aggregating capture-outcome success/latency
-statistics from trace data. A first macOS monitor backend (`MacOSSelectionMonitor`) is available
-for AX selected-text polling with de-duplication. Poll helpers now include cancellation-aware
-loops and an optional coalescing mode for bursty event streams.
+statistics from trace data. Polling monitor backends are available for macOS
+(`MacOSSelectionMonitor`), Windows (`WindowsSelectionMonitor`, `windows-beta`), and Linux
+(`LinuxSelectionMonitor`, `linux-alpha`) with per-backend de-duplication. Poll helpers now
+include cancellation-aware loops and an optional coalescing mode for bursty event streams.
 
 ## Installation
 
@@ -156,8 +157,7 @@ let mut metrics = CaptureMetrics::default();
 
 Current limitations:
 
-- `MacOSSelectionMonitor` uses polling + de-duplication, not native AXObserver callbacks yet
-- No built-in Windows or Linux monitoring backend exists yet
+- Monitoring backends are polling-based (no native observer callback integration yet)
 - No async stream integration exists yet
 - `None` from backend is treated as "no more events" by `run(...)` APIs
 
