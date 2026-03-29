@@ -14,6 +14,7 @@ What exists today:
 - Clipboard and primary-selection paths attempt real reads through host tooling:
   - Wayland: `wl-paste`
   - X11: `xclip` / `xsel`
+- Active app detection is available through `xdotool` (active window PID) plus `ps`/`readlink`.
 - AT-SPI path is still scaffolded and returns `PlatformAttemptResult::Unavailable`.
 - Dispatch behavior and engine-level fallback behavior are covered by unit and smoke tests.
 
@@ -21,7 +22,6 @@ What does not exist yet:
 
 - Real AT-SPI capture
 - Real clipboard-backed synthetic copy flow
-- Active application discovery on Linux
 
 ## Setup
 
@@ -64,6 +64,8 @@ Current `CaptureMethod` mapping in `LinuxPlatform`:
 
 - Clipboard/primary-selection capture depends on host tools (`wl-paste`, `xclip`, `xsel`) being
   installed and reachable in `PATH`.
+- Active app detection depends on `xdotool`, `ps`, and `/proc` (`readlink`) and may fail on
+  restricted Wayland sessions or minimal desktop environments.
 - `AccessibilityPrimary` (AT-SPI) still returns `Unavailable`.
 - `AccessibilityRange` is mapped to primary-selection reads and may be unavailable on restricted
   Wayland/X11 sessions.

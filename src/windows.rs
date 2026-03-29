@@ -39,7 +39,25 @@ impl WindowsBackend for DefaultWindowsBackend {
     }
 
     fn attempt_iaccessible(&self) -> PlatformAttemptResult {
-        PlatformAttemptResult::Unavailable
+        #[cfg(target_os = "windows")]
+        {
+            match read_iaccessible_text() {
+                Ok(Some(text)) => {
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        PlatformAttemptResult::EmptySelection
+                    } else {
+                        PlatformAttemptResult::Success(trimmed.to_string())
+                    }
+                }
+                Ok(None) => PlatformAttemptResult::EmptySelection,
+                Err(_) => PlatformAttemptResult::Unavailable,
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            PlatformAttemptResult::Unavailable
+        }
     }
 
     fn attempt_clipboard(&self) -> PlatformAttemptResult {
@@ -194,6 +212,47 @@ if ($null -ne $valuePattern) {
 }
 
 #[cfg(target_os = "windows")]
+fn read_iaccessible_text() -> Result<Option<String>, String> {
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            r#"
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+if ($null -eq $focused) { return }
+try {
+  $legacy = $focused.GetCurrentPattern([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern)
+} catch {
+  $legacy = $null
+}
+if ($null -eq $legacy) { return }
+$value = $legacy.Current.Value
+if ($null -ne $value -and $value.Trim().Length -gt 0) {
+  Write-Output $value
+  return
+}
+$name = $legacy.Current.Name
+if ($null -ne $name -and $name.Trim().Length -gt 0) {
+  Write-Output $name
+  return
+}
+"#,
+        ])
+        .output()
+        .map_err(|err| err.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+    Ok(normalize_windows_text_stdout(&stdout))
+}
+
+#[cfg(target_os = "windows")]
 fn read_active_app() -> Result<Option<ActiveApp>, String> {
     let output = Command::new("powershell")
         .args([
@@ -306,9 +365,9 @@ mod tests {
     }
 
     #[test]
-    fn active_app_returns_none() {
+    fn active_app_probe_does_not_panic() {
         let platform = WindowsPlatform::new();
-        assert!(platform.active_app().is_none());
+        let _ = platform.active_app();
     }
 
     #[test]

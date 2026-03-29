@@ -102,7 +102,14 @@ impl LinuxPlatform {
 
 impl CapturePlatform for LinuxPlatform {
     fn active_app(&self) -> Option<ActiveApp> {
-        None
+        #[cfg(target_os = "linux")]
+        {
+            return read_active_app().ok().flatten();
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
     }
 
     fn attempt(&self, method: CaptureMethod, _app: Option<&ActiveApp>) -> PlatformAttemptResult {
@@ -172,6 +179,80 @@ fn normalize_linux_text_stdout(stdout: &str) -> Option<String> {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn read_active_app() -> Result<Option<ActiveApp>, String> {
+    let pid = read_active_window_pid()?;
+    let name = read_process_name(pid)?;
+    let bundle_id =
+        read_process_exe_path(pid)?.unwrap_or_else(|| format!("process://{}", name.to_lowercase()));
+
+    Ok(Some(ActiveApp { bundle_id, name }))
+}
+
+#[cfg(target_os = "linux")]
+fn read_active_window_pid() -> Result<u32, String> {
+    let output = Command::new("xdotool")
+        .args(["getactivewindow", "getwindowpid"])
+        .output()
+        .map_err(|err| err.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+    let pid = stdout
+        .trim()
+        .parse::<u32>()
+        .map_err(|err| err.to_string())?;
+    Ok(pid)
+}
+
+#[cfg(target_os = "linux")]
+fn read_process_name(pid: u32) -> Result<String, String> {
+    let pid_arg = pid.to_string();
+    let output = Command::new("ps")
+        .args(["-p", pid_arg.as_str(), "-o", "comm="])
+        .output()
+        .map_err(|err| err.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+    let name = stdout.trim();
+    if name.is_empty() {
+        return Err("empty process name".to_string());
+    }
+    Ok(name.to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn read_process_exe_path(pid: u32) -> Result<Option<String>, String> {
+    let exe_link = format!("/proc/{pid}/exe");
+    let output = Command::new("readlink")
+        .arg(exe_link)
+        .output()
+        .map_err(|err| err.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            return Ok(None);
+        }
+        return Err(stderr);
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+    let path = stdout.trim();
+    if path.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(path.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,9 +285,9 @@ mod tests {
     }
 
     #[test]
-    fn active_app_returns_none() {
+    fn active_app_probe_does_not_panic() {
         let platform = LinuxPlatform::new();
-        assert!(platform.active_app().is_none());
+        let _ = platform.active_app();
     }
 
     #[test]
