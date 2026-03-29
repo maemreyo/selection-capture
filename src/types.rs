@@ -161,6 +161,9 @@ pub enum CaptureOutcome {
     Failure(CaptureFailure),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct WouldBlock;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlatformAttemptResult {
     Success(String),

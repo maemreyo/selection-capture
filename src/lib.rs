@@ -16,7 +16,7 @@ mod windows;
 
 #[cfg(feature = "async")]
 pub use async_api::capture_async;
-pub use engine::capture;
+pub use engine::{capture, try_capture};
 #[cfg(feature = "linux-alpha")]
 pub use linux::LinuxPlatform;
 #[cfg(target_os = "macos")]
@@ -28,7 +28,7 @@ pub use traits::{AppAdapter, AppProfileStore, CancelSignal, CapturePlatform, Mon
 pub use types::{
     ActiveApp, CaptureFailure, CaptureFailureContext, CaptureMethod, CaptureOptions,
     CaptureOutcome, CaptureStatus, CaptureSuccess, CaptureTrace, CleanupStatus, FailureKind,
-    PlatformAttemptResult, RetryPolicy, TraceEvent, UserHint,
+    PlatformAttemptResult, RetryPolicy, TraceEvent, UserHint, WouldBlock,
 };
 #[cfg(feature = "windows-beta")]
 pub use windows::WindowsPlatform;

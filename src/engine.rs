@@ -5,7 +5,7 @@ use crate::types::{
     default_method_order, status_from_failure_kind, update_for_method_result, ActiveApp,
     CaptureFailure, CaptureFailureContext, CaptureMethod, CaptureOptions, CaptureOutcome,
     CaptureStatus, CaptureSuccess, CaptureTrace, CleanupStatus, FailureKind, PlatformAttemptResult,
-    TraceEvent, UserHint,
+    TraceEvent, UserHint, WouldBlock,
 };
 use std::thread;
 use std::time::{Duration, Instant};
@@ -170,6 +170,143 @@ pub fn capture(
     )
 }
 
+pub fn try_capture(
+    platform: &impl CapturePlatform,
+    store: &impl AppProfileStore,
+    cancel: &impl CancelSignal,
+    adapters: &[&dyn AppAdapter],
+    options: &CaptureOptions,
+) -> Result<CaptureOutcome, WouldBlock> {
+    let start = Instant::now();
+    let deadline = start + options.overall_timeout;
+
+    let mut trace = if options.collect_trace {
+        Some(CaptureTrace::default())
+    } else {
+        None
+    };
+    push_trace(&mut trace, TraceEvent::CaptureStarted);
+
+    let active_app = platform.active_app();
+    if let Some(app) = active_app.clone() {
+        push_trace(&mut trace, TraceEvent::ActiveAppDetected(app));
+    }
+
+    let methods = resolve_methods(store, active_app.as_ref(), adapters, options);
+    let mut methods_tried = Vec::new();
+    let mut last_failure: Option<FailureKind> = None;
+    let mut would_block = false;
+
+    for method in methods {
+        if cancel.is_cancelled() {
+            push_trace(&mut trace, TraceEvent::Cancelled);
+            return Ok(finish_failure(
+                platform,
+                trace,
+                CaptureStatus::Cancelled,
+                None,
+                active_app.clone(),
+                methods_tried,
+                None,
+                false,
+            ));
+        }
+
+        if Instant::now() >= deadline {
+            push_trace(&mut trace, TraceEvent::TimedOut);
+            return Ok(finish_failure(
+                platform,
+                trace,
+                CaptureStatus::TimedOut,
+                None,
+                active_app.clone(),
+                methods_tried,
+                None,
+                false,
+            ));
+        }
+
+        let delays = method.retry_delays(&options.retry_policy);
+        if delays.is_empty() {
+            continue;
+        }
+
+        if delays[0] > Duration::ZERO {
+            would_block = true;
+            continue;
+        }
+
+        methods_tried.push(method);
+        push_trace(&mut trace, TraceEvent::MethodStarted(method));
+        let result = platform.attempt(method, active_app.as_ref());
+        store_profile_update(store, active_app.as_ref(), method, &result);
+
+        match result {
+            PlatformAttemptResult::Success(text) => {
+                push_trace(&mut trace, TraceEvent::MethodSucceeded(method));
+                return Ok(finish_success(platform, trace, text, method));
+            }
+            PlatformAttemptResult::EmptySelection => {
+                push_trace(&mut trace, TraceEvent::MethodReturnedEmpty(method));
+                last_failure = Some(FailureKind::EmptySelection);
+            }
+            PlatformAttemptResult::PermissionDenied => {
+                push_trace(
+                    &mut trace,
+                    TraceEvent::MethodFailed {
+                        method,
+                        kind: FailureKind::PermissionDenied,
+                    },
+                );
+                last_failure = Some(FailureKind::PermissionDenied);
+            }
+            PlatformAttemptResult::AppBlocked => {
+                push_trace(
+                    &mut trace,
+                    TraceEvent::MethodFailed {
+                        method,
+                        kind: FailureKind::AppBlocked,
+                    },
+                );
+                last_failure = Some(FailureKind::AppBlocked);
+            }
+            PlatformAttemptResult::ClipboardBorrowAmbiguous => {
+                push_trace(
+                    &mut trace,
+                    TraceEvent::MethodFailed {
+                        method,
+                        kind: FailureKind::ClipboardAmbiguous,
+                    },
+                );
+                last_failure = Some(FailureKind::ClipboardAmbiguous);
+            }
+            PlatformAttemptResult::Unavailable => {}
+        }
+
+        if delays.len() > 1 {
+            would_block = true;
+        }
+    }
+
+    if would_block {
+        return Err(WouldBlock);
+    }
+
+    let status = last_failure
+        .map(status_from_failure_kind)
+        .unwrap_or(CaptureStatus::StrategyExhausted);
+    Ok(finish_failure(
+        platform,
+        trace,
+        status,
+        None,
+        active_app,
+        methods_tried,
+        None,
+        false,
+    ))
+}
+
 fn resolve_methods(
     store: &impl AppProfileStore,
     active_app: Option<&ActiveApp>,
@@ -310,7 +447,7 @@ mod tests {
     use crate::profile::{AppProfile, AppProfileUpdate};
     use crate::traits::{AppAdapter, AppProfileStore, CancelSignal, CapturePlatform};
     use crate::types::{
-        ActiveApp, CaptureOptions, CaptureStatus, CleanupStatus, PlatformAttemptResult,
+        ActiveApp, CaptureOptions, CaptureStatus, CleanupStatus, PlatformAttemptResult, WouldBlock,
     };
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
@@ -473,6 +610,96 @@ mod tests {
                 )));
             }
             CaptureOutcome::Failure(_) => panic!("expected success"),
+        }
+    }
+
+    #[test]
+    fn try_capture_returns_would_block_when_later_method_requires_delay() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.test".into(),
+                name: "Test".into(),
+            }),
+            responses: Arc::new(Mutex::new(vec![
+                PlatformAttemptResult::Unavailable,
+                PlatformAttemptResult::Unavailable,
+                PlatformAttemptResult::Success("clipboard".into()),
+            ])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let store = StubStore;
+        let cancel = NeverCancel;
+        let adapter = NoAdapters;
+        let mut options = CaptureOptions::default();
+        options.retry_policy.primary_accessibility = vec![Duration::ZERO];
+        options.retry_policy.range_accessibility = vec![Duration::ZERO];
+        options.retry_policy.clipboard = vec![Duration::from_millis(120)];
+
+        let out = try_capture(&platform, &store, &cancel, &[&adapter], &options);
+        assert_eq!(out, Err(WouldBlock));
+    }
+
+    #[test]
+    fn try_capture_succeeds_immediately_when_primary_method_succeeds() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.test".into(),
+                name: "Test".into(),
+            }),
+            responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                "hello".into(),
+            )])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let store = StubStore;
+        let cancel = NeverCancel;
+        let adapter = NoAdapters;
+        let mut options = CaptureOptions::default();
+        options.retry_policy.primary_accessibility = vec![Duration::ZERO];
+        options.retry_policy.range_accessibility = vec![Duration::ZERO];
+        options.retry_policy.clipboard = vec![Duration::from_millis(120)];
+
+        let out = try_capture(&platform, &store, &cancel, &[&adapter], &options)
+            .expect("should not block");
+        match out {
+            CaptureOutcome::Success(success) => {
+                assert_eq!(success.method, CaptureMethod::AccessibilityPrimary);
+                assert_eq!(success.text, "hello");
+            }
+            other => panic!("expected success, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn try_capture_returns_failure_when_all_immediate_methods_are_exhausted() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.test".into(),
+                name: "Test".into(),
+            }),
+            responses: Arc::new(Mutex::new(vec![
+                PlatformAttemptResult::PermissionDenied,
+                PlatformAttemptResult::Unavailable,
+            ])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let store = StubStore;
+        let cancel = NeverCancel;
+        let adapter = NoAdapters;
+        let mut options = CaptureOptions {
+            allow_clipboard_borrow: false,
+            ..CaptureOptions::default()
+        };
+        options.retry_policy.primary_accessibility = vec![Duration::ZERO];
+        options.retry_policy.range_accessibility = vec![Duration::ZERO];
+
+        let out = try_capture(&platform, &store, &cancel, &[&adapter], &options)
+            .expect("all paths are immediate");
+        match out {
+            CaptureOutcome::Failure(failure) => {
+                assert_eq!(failure.status, CaptureStatus::PermissionDenied);
+            }
+            other => panic!("expected failure, got {other:?}"),
         }
     }
 }

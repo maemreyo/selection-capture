@@ -102,6 +102,7 @@ fn main() {
 ### Main Function
 
 - `capture(...)` → `CaptureOutcome` - The primary capture function
+- `try_capture(...)` → `Result<CaptureOutcome, WouldBlock>` - Non-blocking single-pass variant
 - `capture_async(...).await` → `CaptureOutcome` - Optional Tokio-backed wrapper behind the `async` feature
 
 ### Configuration
