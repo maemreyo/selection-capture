@@ -11,15 +11,15 @@ What exists today:
   - UI Automation
   - IAccessible
   - Clipboard
-- The current backend safely returns `PlatformAttemptResult::Unavailable` until native
-  implementations are added.
+- Clipboard path reads real clipboard text via PowerShell (`Get-Clipboard -Raw`) on Windows.
+- UI Automation and IAccessible paths currently stay scaffolded and return `Unavailable`.
 - Fallback behavior is covered by unit and smoke tests.
 
 What does not exist yet:
 
 - Real UI Automation capture
 - Real IAccessible range capture
-- Real clipboard-backed synthetic copy flow
+- Real synthetic copy flow (Ctrl+C + restore semantics)
 - Active application discovery on Windows
 
 ## Setup
@@ -60,8 +60,9 @@ Current `CaptureMethod` mapping in `WindowsPlatform`:
 
 ## Known Limitations
 
-- All Windows attempt methods currently return `Unavailable`.
-- `SyntheticCopy` does not yet synthesize key input; it shares the clipboard dispatch slot.
+- Clipboard capture currently reads existing clipboard content and does not synthesize copy.
+- UI Automation and IAccessible attempts still return `Unavailable`.
+- `SyntheticCopy` does not yet synthesize key input; it currently shares clipboard dispatch.
 - There is no Windows-specific cleanup behavior yet.
 - There is no Windows permission or capability detection yet.
-- The beta surface is suitable for engine integration and CI validation, not end-user capture.
+- The beta surface is suitable for engine integration and incremental backend rollout.

@@ -1,5 +1,7 @@
 use crate::traits::CapturePlatform;
 use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
+#[cfg(target_os = "windows")]
+use std::process::Command;
 
 #[derive(Debug, Default)]
 pub struct WindowsPlatform;
@@ -23,7 +25,25 @@ impl WindowsBackend for DefaultWindowsBackend {
     }
 
     fn attempt_clipboard(&self) -> PlatformAttemptResult {
-        PlatformAttemptResult::Unavailable
+        #[cfg(target_os = "windows")]
+        {
+            match read_clipboard_text() {
+                Ok(Some(text)) => {
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        PlatformAttemptResult::EmptySelection
+                    } else {
+                        PlatformAttemptResult::Success(trimmed.to_string())
+                    }
+                }
+                Ok(None) => PlatformAttemptResult::EmptySelection,
+                Err(_) => PlatformAttemptResult::Unavailable,
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            PlatformAttemptResult::Unavailable
+        }
     }
 }
 
@@ -73,6 +93,37 @@ impl CapturePlatform for WindowsPlatform {
 
     fn cleanup(&self) -> CleanupStatus {
         CleanupStatus::Clean
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn read_clipboard_text() -> Result<Option<String>, String> {
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$t = Get-Clipboard -Raw; if ($null -eq $t) { '' } else { $t }",
+        ])
+        .output()
+        .map_err(|err| err.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+    Ok(normalize_clipboard_stdout(&stdout))
+}
+
+#[cfg(target_os = "windows")]
+fn normalize_clipboard_stdout(stdout: &str) -> Option<String> {
+    let text = stdout.replace("\r\n", "\n");
+    let normalized = text.trim_end_matches(['\r', '\n']);
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.to_string())
     }
 }
 
@@ -143,5 +194,22 @@ mod tests {
             WindowsPlatform::dispatch_attempt(&backend, CaptureMethod::SyntheticCopy),
             PlatformAttemptResult::Success("clipboard".into())
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn normalizes_clipboard_stdout_and_strips_trailing_newline() {
+        let raw = "line one\r\nline two\r\n";
+        assert_eq!(
+            normalize_clipboard_stdout(raw),
+            Some("line one\nline two".to_string())
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn returns_none_when_clipboard_stdout_is_effectively_empty() {
+        assert_eq!(normalize_clipboard_stdout("\r\n"), None);
+        assert_eq!(normalize_clipboard_stdout(""), None);
     }
 }
