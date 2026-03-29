@@ -84,7 +84,14 @@ impl WindowsPlatform {
 
 impl CapturePlatform for WindowsPlatform {
     fn active_app(&self) -> Option<ActiveApp> {
-        None
+        #[cfg(target_os = "windows")]
+        {
+            return read_active_app().ok().flatten();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            None
+        }
     }
 
     fn attempt(&self, method: CaptureMethod, _app: Option<&ActiveApp>) -> PlatformAttemptResult {
@@ -117,6 +124,49 @@ fn read_clipboard_text() -> Result<Option<String>, String> {
 }
 
 #[cfg(target_os = "windows")]
+fn read_active_app() -> Result<Option<ActiveApp>, String> {
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            r#"
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class Win32 {
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetForegroundWindow();
+
+  [DllImport("user32.dll")]
+  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+}
+"@
+$hwnd = [Win32]::GetForegroundWindow()
+if ($hwnd -eq [IntPtr]::Zero) { return }
+$pid = 0
+[Win32]::GetWindowThreadProcessId($hwnd, [ref]$pid) | Out-Null
+if ($pid -eq 0) { return }
+$process = Get-Process -Id $pid -ErrorAction SilentlyContinue
+if ($null -eq $process) { return }
+$name = $process.ProcessName
+$path = $process.Path
+Write-Output ("NAME:" + $name)
+Write-Output ("PATH:" + $path)
+"#,
+        ])
+        .output()
+        .map_err(|err| err.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+    Ok(parse_active_app_stdout(&stdout))
+}
+
+#[cfg(target_os = "windows")]
 fn normalize_clipboard_stdout(stdout: &str) -> Option<String> {
     let text = stdout.replace("\r\n", "\n");
     let normalized = text.trim_end_matches(['\r', '\n']);
@@ -125,6 +175,33 @@ fn normalize_clipboard_stdout(stdout: &str) -> Option<String> {
     } else {
         Some(normalized.to_string())
     }
+}
+
+#[cfg(target_os = "windows")]
+fn parse_active_app_stdout(stdout: &str) -> Option<ActiveApp> {
+    let mut name: Option<String> = None;
+    let mut path: Option<String> = None;
+
+    for line in stdout.lines() {
+        if let Some(value) = line.strip_prefix("NAME:") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                name = Some(trimmed.to_string());
+            }
+        } else if let Some(value) = line.strip_prefix("PATH:") {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                path = Some(trimmed.to_string());
+            }
+        }
+    }
+
+    let app_name = name?;
+    let bundle_id = path.unwrap_or_else(|| format!("process://{}", app_name.to_lowercase()));
+    Some(ActiveApp {
+        bundle_id,
+        name: app_name,
+    })
 }
 
 #[cfg(test)]
@@ -211,5 +288,28 @@ mod tests {
     fn returns_none_when_clipboard_stdout_is_effectively_empty() {
         assert_eq!(normalize_clipboard_stdout("\r\n"), None);
         assert_eq!(normalize_clipboard_stdout(""), None);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn parses_active_app_stdout_with_path() {
+        let raw = "NAME:Code\nPATH:C:\\Program Files\\Microsoft VS Code\\Code.exe\n";
+        let parsed = parse_active_app_stdout(raw).expect("active app");
+
+        assert_eq!(parsed.name, "Code");
+        assert_eq!(
+            parsed.bundle_id,
+            "C:\\Program Files\\Microsoft VS Code\\Code.exe"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn parses_active_app_stdout_without_path_uses_process_fallback() {
+        let raw = "NAME:Notepad\nPATH:\n";
+        let parsed = parse_active_app_stdout(raw).expect("active app");
+
+        assert_eq!(parsed.name, "Notepad");
+        assert_eq!(parsed.bundle_id, "process://notepad");
     }
 }
