@@ -21,7 +21,7 @@ pub use engine::{capture, try_capture};
 pub use linux::{LinuxPlatform, LinuxSelectionMonitor};
 #[cfg(target_os = "macos")]
 pub use macos::{MacOSPlatform, MacOSSelectionMonitor};
-pub use monitor::{CaptureMetrics, CaptureMonitor, MethodMetrics};
+pub use monitor::{CaptureMetrics, CaptureMonitor, MethodMetrics, MonitorSpamGuard};
 pub use platform::PlatformCapabilities;
 pub use profile::{AppProfile, AppProfileUpdate, TriState};
 pub use traits::{AppAdapter, AppProfileStore, CancelSignal, CapturePlatform, MonitorPlatform};

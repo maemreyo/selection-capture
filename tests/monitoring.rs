@@ -1,7 +1,7 @@
 use selection_capture::{
     CancelSignal, CaptureFailure, CaptureFailureContext, CaptureMethod, CaptureMetrics,
     CaptureMonitor, CaptureOutcome, CaptureStatus, CaptureSuccess, CaptureTrace, CleanupStatus,
-    FailureKind, MonitorPlatform, TraceEvent,
+    FailureKind, MonitorPlatform, MonitorSpamGuard, TraceEvent,
 };
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -148,6 +148,99 @@ fn monitor_poll_until_cancelled_coalesced_suppresses_burst_events() {
 
     assert_eq!(processed, 1);
     assert_eq!(observed, vec!["a".to_string()]);
+}
+
+#[test]
+fn monitor_poll_until_cancelled_guarded_suppresses_identical_bursts() {
+    let mut events = vec![Some("stable")];
+    events.extend((0..99).map(|_| Some("stable")));
+    events.push(None);
+    let platform = StubMonitorPlatform::new(events);
+    let monitor = CaptureMonitor::new(platform);
+    let cancel = LoopCancelSignal::new(130);
+    let mut observed = Vec::new();
+    let guard = MonitorSpamGuard::default();
+
+    let processed =
+        monitor.poll_until_cancelled_guarded(Duration::ZERO, &cancel, &guard, |event| {
+            observed.push(event)
+        });
+
+    assert_eq!(processed, 1);
+    assert_eq!(observed, vec!["stable".to_string()]);
+}
+
+#[test]
+fn monitor_poll_until_cancelled_guarded_keeps_distinct_updates() {
+    let platform = StubMonitorPlatform::new(vec![Some("a"), Some("b"), Some("c"), None]);
+    let monitor = CaptureMonitor::new(platform);
+    let cancel = LoopCancelSignal::new(8);
+    let mut observed = Vec::new();
+    let guard = MonitorSpamGuard::default();
+
+    let processed =
+        monitor.poll_until_cancelled_guarded(Duration::ZERO, &cancel, &guard, |event| {
+            observed.push(event)
+        });
+
+    assert_eq!(processed, 3);
+    assert_eq!(
+        observed,
+        vec!["a".to_string(), "b".to_string(), "c".to_string()]
+    );
+}
+
+#[test]
+fn monitor_poll_until_cancelled_guarded_can_enforce_global_emit_interval() {
+    let platform = StubMonitorPlatform::new(vec![Some("a"), Some("b"), Some("c"), None]);
+    let monitor = CaptureMonitor::new(platform);
+    let cancel = LoopCancelSignal::new(8);
+    let mut observed = Vec::new();
+    let guard = MonitorSpamGuard {
+        suppress_identical: false,
+        min_emit_interval: Duration::from_secs(60),
+        min_emit_interval_same_text: Duration::ZERO,
+        normalize_whitespace: false,
+    };
+
+    let processed =
+        monitor.poll_until_cancelled_guarded(Duration::ZERO, &cancel, &guard, |event| {
+            observed.push(event)
+        });
+
+    assert_eq!(processed, 1);
+    assert_eq!(observed, vec!["a".to_string()]);
+}
+
+#[test]
+fn monitor_poll_until_cancelled_guarded_can_normalize_whitespace_for_dedup() {
+    let platform = StubMonitorPlatform::new(vec![
+        Some("hello   world"),
+        Some("hello world"),
+        Some("hello   world  again"),
+        None,
+    ]);
+    let monitor = CaptureMonitor::new(platform);
+    let cancel = LoopCancelSignal::new(8);
+    let mut observed = Vec::new();
+    let guard = MonitorSpamGuard {
+        normalize_whitespace: true,
+        ..MonitorSpamGuard::default()
+    };
+
+    let processed =
+        monitor.poll_until_cancelled_guarded(Duration::ZERO, &cancel, &guard, |event| {
+            observed.push(event)
+        });
+
+    assert_eq!(processed, 2);
+    assert_eq!(
+        observed,
+        vec![
+            "hello   world".to_string(),
+            "hello   world  again".to_string()
+        ]
+    );
 }
 
 #[test]

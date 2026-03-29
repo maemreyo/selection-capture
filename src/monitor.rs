@@ -7,6 +7,25 @@ pub struct CaptureMonitor<P> {
     platform: P,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MonitorSpamGuard {
+    pub suppress_identical: bool,
+    pub min_emit_interval: Duration,
+    pub min_emit_interval_same_text: Duration,
+    pub normalize_whitespace: bool,
+}
+
+impl Default for MonitorSpamGuard {
+    fn default() -> Self {
+        Self {
+            suppress_identical: true,
+            min_emit_interval: Duration::ZERO,
+            min_emit_interval_same_text: Duration::ZERO,
+            normalize_whitespace: false,
+        }
+    }
+}
+
 impl<P> CaptureMonitor<P>
 where
     P: MonitorPlatform,
@@ -123,6 +142,62 @@ where
 
         processed
     }
+
+    pub fn poll_until_cancelled_guarded<F, S>(
+        &self,
+        poll_interval: Duration,
+        cancel: &S,
+        guard: &MonitorSpamGuard,
+        mut on_event: F,
+    ) -> usize
+    where
+        F: FnMut(String),
+        S: CancelSignal,
+    {
+        let mut processed = 0;
+        let mut last_emit_at: Option<Instant> = None;
+        let mut last_emitted_text: Option<String> = None;
+
+        while !cancel.is_cancelled() {
+            if let Some(event) = self.next_event() {
+                let normalized = normalize_event_text(&event, guard.normalize_whitespace);
+                let now = Instant::now();
+                let too_soon_global = last_emit_at
+                    .map(|last| now.duration_since(last) < guard.min_emit_interval)
+                    .unwrap_or(false);
+                let same_as_last = last_emitted_text
+                    .as_ref()
+                    .map(|last| last == &normalized)
+                    .unwrap_or(false);
+                let too_soon_same = same_as_last
+                    && last_emit_at
+                        .map(|last| now.duration_since(last) < guard.min_emit_interval_same_text)
+                        .unwrap_or(false);
+                let blocked_duplicate = guard.suppress_identical && same_as_last;
+
+                if too_soon_global || too_soon_same || blocked_duplicate {
+                    continue;
+                }
+
+                on_event(event);
+                processed += 1;
+                last_emit_at = Some(now);
+                last_emitted_text = Some(normalized);
+                continue;
+            }
+            thread::sleep(poll_interval);
+        }
+
+        processed
+    }
+}
+
+fn normalize_event_text(input: &str, normalize_whitespace: bool) -> String {
+    if !normalize_whitespace {
+        return input.to_string();
+    }
+
+    input.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

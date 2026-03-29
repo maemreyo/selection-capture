@@ -123,6 +123,7 @@ fn main() {
 ```rust
 use selection_capture::{
     CancelSignal, CaptureMetrics, CaptureMonitor, MacOSSelectionMonitor, MonitorPlatform,
+    MonitorSpamGuard,
 };
 
 struct StubMonitor;
@@ -151,6 +152,19 @@ let _processed = mac_monitor.poll_until_cancelled(
     |text| println!("live selection: {text}"),
 );
 
+let guard = MonitorSpamGuard {
+    suppress_identical: true,
+    min_emit_interval: std::time::Duration::ZERO,
+    min_emit_interval_same_text: std::time::Duration::from_millis(200),
+    normalize_whitespace: true,
+};
+let _guarded = mac_monitor.poll_until_cancelled_guarded(
+    std::time::Duration::from_millis(120),
+    &cancel,
+    &guard,
+    |text| println!("de-spammed selection: {text}"),
+);
+
 let mut metrics = CaptureMetrics::default();
 // metrics.record_outcome(&capture_outcome);
 ```
@@ -160,6 +174,7 @@ Current limitations:
 - Monitoring backends are polling-based (no native observer callback integration yet)
 - No async stream integration exists yet
 - `None` from backend is treated as "no more events" by `run(...)` APIs
+- For anti-spam behavior, prefer `poll_until_cancelled_guarded(...)` with `MonitorSpamGuard`
 
 ### Return Types
 

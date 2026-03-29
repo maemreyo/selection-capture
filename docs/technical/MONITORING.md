@@ -9,7 +9,8 @@ What exists today:
 - `MonitorPlatform` defines the minimal backend contract for selection-change polling.
 - `CaptureMonitor<P>` wraps a backend and exposes `next_event()`, `run()`, `run_with_limit()`,
   `collect_events()`, `poll_until()`, `poll_until_cancelled()`, and
-  `poll_until_cancelled_coalesced()` helpers for synchronous processing loops.
+  `poll_until_cancelled_coalesced()`, and `poll_until_cancelled_guarded()` helpers for
+  synchronous processing loops.
 - `MacOSSelectionMonitor` provides a first-party macOS monitor backend (polling + de-duplication
   via AX selected-text reads).
 - `WindowsSelectionMonitor` (`windows-beta`) provides a Windows polling backend with
@@ -70,6 +71,20 @@ impl<P: MonitorPlatform> CaptureMonitor<P> {
         cancel: &S,
         on_event: F,
     ) -> usize;
+    pub fn poll_until_cancelled_guarded<F: FnMut(String), S: CancelSignal>(
+        &self,
+        poll_interval: Duration,
+        cancel: &S,
+        guard: &MonitorSpamGuard,
+        on_event: F,
+    ) -> usize;
+}
+
+pub struct MonitorSpamGuard {
+    pub suppress_identical: bool,
+    pub min_emit_interval: Duration,
+    pub min_emit_interval_same_text: Duration,
+    pub normalize_whitespace: bool,
 }
 ```
 
@@ -95,3 +110,4 @@ adaptation, or cancellation. That work is intentionally deferred until native ho
 - The API does not distinguish "no event yet" from "monitor exhausted"
 - macOS implementation is polling-based, not callback-based (`AXObserver`) yet
 - Coalescing mode intentionally drops events inside the emit interval window
+- Guarded mode intentionally suppresses events based on configured duplicate/interval policy
