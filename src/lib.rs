@@ -6,6 +6,7 @@ mod engine;
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+mod monitor;
 pub mod platform;
 mod profile;
 mod traits;
@@ -20,9 +21,10 @@ pub use engine::capture;
 pub use linux::LinuxPlatform;
 #[cfg(target_os = "macos")]
 pub use macos::MacOSPlatform;
+pub use monitor::CaptureMonitor;
 pub use platform::PlatformCapabilities;
 pub use profile::{AppProfile, AppProfileUpdate, TriState};
-pub use traits::{AppAdapter, AppProfileStore, CancelSignal, CapturePlatform};
+pub use traits::{AppAdapter, AppProfileStore, CancelSignal, CapturePlatform, MonitorPlatform};
 pub use types::{
     ActiveApp, CaptureFailure, CaptureFailureContext, CaptureMethod, CaptureOptions,
     CaptureOutcome, CaptureStatus, CaptureSuccess, CaptureTrace, CleanupStatus, FailureKind,

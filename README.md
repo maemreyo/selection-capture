@@ -15,6 +15,7 @@ with explicit capture status and trace metadata for app-level UX decisions.
 
 - ✅ **Synchronous API** - Simple, blocking calls that are easy to integrate
 - ✅ **Optional Async API** - Feature-gated `capture_async(...)` for Tokio-based applications
+- 🧪 **Experimental Monitoring Scaffold** - Backend-agnostic monitoring API surface for future selection change streams
 - 🔄 **Retry Logic** - Automatic retry with configurable budgets and delays
 - ⚡ **Multiple Strategies** - Falls back through different capture methods automatically
 - 🎯 **App-Specific Profiles** - Customize behavior per application
@@ -27,6 +28,10 @@ with explicit capture status and trace metadata for app-level UX decisions.
 - **macOS**: Fully implemented (`MacOSPlatform`)
 - **Windows**: `windows-beta` feature flag exposes a bounded MVP scaffold with compile-safe dispatch and fallback tests. Current attempts return `Unavailable` until backend implementations land.
 - **Other platforms**: Portable API via `CapturePlatform` trait, implementations welcome!
+
+Experimental monitoring support is currently backend-agnostic only. The crate now exposes a
+generic `MonitorPlatform` trait plus `CaptureMonitor<P>`, but no OS-specific monitor backend is
+wired yet, so event production depends entirely on user-supplied implementations.
 
 ## Installation
 
@@ -103,9 +108,33 @@ fn main() {
 
 - `CaptureOptions` - Configure timeouts, trace collection, and strategy overrides
 - `CapturePlatform` - Trait for platform-specific implementations
+- `MonitorPlatform` - Experimental trait for platform-specific selection-change monitoring
 - `CancelSignal` - Trait for cooperative cancellation
 - `AppAdapter` - Trait for app-specific customizations
 - `AppProfileStore` - Trait for persisting app profiles
+
+### Experimental Monitoring
+
+```rust
+use selection_capture::{CaptureMonitor, MonitorPlatform};
+
+struct StubMonitor;
+
+impl MonitorPlatform for StubMonitor {
+    fn next_selection_change(&self) -> Option<String> {
+        Some("example selection".to_string())
+    }
+}
+
+let monitor = CaptureMonitor::new(StubMonitor);
+assert_eq!(monitor.next_event(), Some("example selection".to_string()));
+```
+
+Current limitations:
+
+- No built-in macOS, Windows, or Linux monitoring backend exists yet
+- No async stream integration exists yet
+- No OS event subscription, lifecycle, or permission handling is implemented yet
 
 ### Return Types
 
@@ -203,6 +232,7 @@ cargo clippy --all-targets
 - [Specification](SPEC.md)
 - [Changelog](CHANGELOG.md)
 - [Windows Beta Notes](docs/technical/WINDOWS.md)
+- [Monitoring Notes](docs/technical/MONITORING.md)
 
 ## Related Projects
 

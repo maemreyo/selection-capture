@@ -23,3 +23,7 @@ pub trait CapturePlatform {
     fn attempt(&self, method: CaptureMethod, app: Option<&ActiveApp>) -> PlatformAttemptResult;
     fn cleanup(&self) -> CleanupStatus;
 }
+
+pub trait MonitorPlatform {
+    fn next_selection_change(&self) -> Option<String>;
+}
