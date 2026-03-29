@@ -1,3 +1,4 @@
+use crate::cache::prioritize_profile_method;
 use crate::profile::AppProfileUpdate;
 use crate::traits::{AppAdapter, AppProfileStore, CancelSignal, CapturePlatform};
 use crate::types::{
@@ -31,7 +32,7 @@ pub fn capture(
         push_trace(&mut trace, TraceEvent::ActiveAppDetected(app));
     }
 
-    let methods = resolve_methods(active_app.as_ref(), adapters, options);
+    let methods = resolve_methods(store, active_app.as_ref(), adapters, options);
     let mut methods_tried = Vec::new();
     let mut last_failure: Option<FailureKind> = None;
 
@@ -170,6 +171,7 @@ pub fn capture(
 }
 
 fn resolve_methods(
+    store: &impl AppProfileStore,
     active_app: Option<&ActiveApp>,
     adapters: &[&dyn AppAdapter],
     options: &CaptureOptions,
@@ -185,7 +187,14 @@ fn resolve_methods(
                 }
             }
         }
+
+        let profile = store.load(app);
+        return prioritize_profile_method(
+            default_method_order(options.allow_clipboard_borrow),
+            Some(&profile),
+        );
     }
+
     default_method_order(options.allow_clipboard_borrow)
 }
 

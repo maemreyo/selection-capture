@@ -1,5 +1,6 @@
 #[cfg(feature = "async")]
 mod async_api;
+mod cache;
 mod engine;
 #[cfg(feature = "linux-alpha")]
 mod linux;

@@ -125,6 +125,9 @@ For testing the full capture flow. Integration tests live in `tests/`.
 
 Current coverage includes `tests/windows_smoke.rs`, which validates fallback ordering for the
 `windows-beta` feature using a stub `CapturePlatform`.
+`tests/perf_smoke.rs` covers the default-resolution path and verifies that, when an active app
+profile has a `last_success_method` that is still allowed in the default method list, that method
+is tried first without changing `strategy_override` or adapter override precedence.
 
 ### Manual Testing
 
@@ -238,6 +241,9 @@ The macOS implementation uses:
 ## Performance Considerations
 
 - Capture should complete within 1-2 seconds typically
+- Default method resolution is profile-aware: the engine may move the active app's
+  `last_success_method` to the front of the default order, but only when no explicit strategy
+  override or adapter override applies.
 - Retry delays are intentionally short (50-100ms) to avoid user-perceptible lag
 - Clipboard operations should be minimized
 - Trace collection has minimal overhead when disabled
