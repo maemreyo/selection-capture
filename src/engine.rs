@@ -10,6 +10,15 @@ use crate::types::{
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[derive(Clone, Debug)]
+struct ScheduledAttempt {
+    method: CaptureMethod,
+    delays: Vec<Duration>,
+    next_attempt_idx: usize,
+    next_due: Instant,
+    order: usize,
+}
+
 pub fn capture(
     platform: &impl CapturePlatform,
     store: &impl AppProfileStore,
@@ -36,10 +45,66 @@ pub fn capture(
     let mut methods_tried = Vec::new();
     let mut last_failure: Option<FailureKind> = None;
 
-    for method in methods {
-        let delays = method.retry_delays(&options.retry_policy);
-        for (idx, delay) in delays.iter().enumerate() {
-            if cancel.is_cancelled() {
+    let mut schedule = build_capture_schedule(&methods, options, start);
+    while !schedule.is_empty() {
+        if cancel.is_cancelled() {
+            push_trace(&mut trace, TraceEvent::Cancelled);
+            return finish_failure(
+                platform,
+                trace,
+                CaptureStatus::Cancelled,
+                None,
+                active_app.clone(),
+                methods_tried,
+                None,
+                false,
+                start,
+            );
+        }
+
+        let now = Instant::now();
+        if now >= deadline {
+            push_trace(&mut trace, TraceEvent::TimedOut);
+            return finish_failure(
+                platform,
+                trace,
+                CaptureStatus::TimedOut,
+                None,
+                active_app.clone(),
+                methods_tried,
+                None,
+                false,
+                start,
+            );
+        }
+
+        let Some(next_index) = select_next_scheduled_attempt(&schedule) else {
+            break;
+        };
+        let next = &schedule[next_index];
+        if now < next.next_due {
+            let wait = next.next_due.saturating_duration_since(now);
+            let remaining = deadline.saturating_duration_since(now);
+            if remaining < wait {
+                push_trace(
+                    &mut trace,
+                    TraceEvent::RetryWaitSkipped {
+                        method: next.method,
+                        remaining_budget: remaining,
+                        needed_delay: wait,
+                    },
+                );
+                break;
+            }
+
+            push_trace(
+                &mut trace,
+                TraceEvent::RetryWaitStarted {
+                    method: next.method,
+                    delay: wait,
+                },
+            );
+            if wait_with_polling(wait, deadline, cancel, options.retry_policy.poll_interval) {
                 push_trace(&mut trace, TraceEvent::Cancelled);
                 return finish_failure(
                     platform,
@@ -53,116 +118,73 @@ pub fn capture(
                     start,
                 );
             }
+            continue;
+        }
 
-            let now = Instant::now();
-            if now >= deadline {
-                push_trace(&mut trace, TraceEvent::TimedOut);
-                return finish_failure(
-                    platform,
-                    trace,
-                    CaptureStatus::TimedOut,
-                    None,
-                    active_app.clone(),
-                    methods_tried,
-                    None,
-                    false,
-                    start,
-                );
+        let method = schedule[next_index].method;
+        methods_tried.push(method);
+        push_trace(&mut trace, TraceEvent::MethodStarted(method));
+        let attempt_started_at = Instant::now();
+        let result = platform.attempt(method, active_app.as_ref());
+        push_trace(
+            &mut trace,
+            TraceEvent::MethodFinished {
+                method,
+                elapsed: attempt_started_at.elapsed(),
+            },
+        );
+        store_profile_update(store, active_app.as_ref(), method, &result);
+
+        match result {
+            PlatformAttemptResult::Success(text) => {
+                push_trace(&mut trace, TraceEvent::MethodSucceeded(method));
+                return finish_success(platform, trace, text, method, start);
             }
-
-            if idx > 0 {
-                let remaining = deadline.saturating_duration_since(now);
-                if remaining < *delay {
-                    push_trace(
-                        &mut trace,
-                        TraceEvent::RetryWaitSkipped {
-                            method,
-                            remaining_budget: remaining,
-                            needed_delay: *delay,
-                        },
-                    );
-                    break;
-                }
-
+            PlatformAttemptResult::EmptySelection => {
+                push_trace(&mut trace, TraceEvent::MethodReturnedEmpty(method));
+                last_failure = Some(FailureKind::EmptySelection);
+            }
+            PlatformAttemptResult::PermissionDenied => {
                 push_trace(
                     &mut trace,
-                    TraceEvent::RetryWaitStarted {
+                    TraceEvent::MethodFailed {
                         method,
-                        delay: *delay,
+                        kind: FailureKind::PermissionDenied,
                     },
                 );
-
-                if wait_with_polling(*delay, deadline, cancel, options.retry_policy.poll_interval) {
-                    push_trace(&mut trace, TraceEvent::Cancelled);
-                    return finish_failure(
-                        platform,
-                        trace,
-                        CaptureStatus::Cancelled,
-                        None,
-                        active_app.clone(),
-                        methods_tried,
-                        None,
-                        false,
-                        start,
-                    );
-                }
+                last_failure = Some(FailureKind::PermissionDenied);
             }
-
-            methods_tried.push(method);
-            push_trace(&mut trace, TraceEvent::MethodStarted(method));
-            let attempt_started_at = Instant::now();
-            let result = platform.attempt(method, active_app.as_ref());
-            push_trace(
-                &mut trace,
-                TraceEvent::MethodFinished {
-                    method,
-                    elapsed: attempt_started_at.elapsed(),
-                },
-            );
-            store_profile_update(store, active_app.as_ref(), method, &result);
-
-            match result {
-                PlatformAttemptResult::Success(text) => {
-                    push_trace(&mut trace, TraceEvent::MethodSucceeded(method));
-                    return finish_success(platform, trace, text, method, start);
-                }
-                PlatformAttemptResult::EmptySelection => {
-                    push_trace(&mut trace, TraceEvent::MethodReturnedEmpty(method));
-                    last_failure = Some(FailureKind::EmptySelection);
-                }
-                PlatformAttemptResult::PermissionDenied => {
-                    push_trace(
-                        &mut trace,
-                        TraceEvent::MethodFailed {
-                            method,
-                            kind: FailureKind::PermissionDenied,
-                        },
-                    );
-                    last_failure = Some(FailureKind::PermissionDenied);
-                }
-                PlatformAttemptResult::AppBlocked => {
-                    push_trace(
-                        &mut trace,
-                        TraceEvent::MethodFailed {
-                            method,
-                            kind: FailureKind::AppBlocked,
-                        },
-                    );
-                    last_failure = Some(FailureKind::AppBlocked);
-                }
-                PlatformAttemptResult::ClipboardBorrowAmbiguous => {
-                    push_trace(
-                        &mut trace,
-                        TraceEvent::MethodFailed {
-                            method,
-                            kind: FailureKind::ClipboardAmbiguous,
-                        },
-                    );
-                    last_failure = Some(FailureKind::ClipboardAmbiguous);
-                }
-                PlatformAttemptResult::Unavailable => {}
+            PlatformAttemptResult::AppBlocked => {
+                push_trace(
+                    &mut trace,
+                    TraceEvent::MethodFailed {
+                        method,
+                        kind: FailureKind::AppBlocked,
+                    },
+                );
+                last_failure = Some(FailureKind::AppBlocked);
             }
+            PlatformAttemptResult::ClipboardBorrowAmbiguous => {
+                push_trace(
+                    &mut trace,
+                    TraceEvent::MethodFailed {
+                        method,
+                        kind: FailureKind::ClipboardAmbiguous,
+                    },
+                );
+                last_failure = Some(FailureKind::ClipboardAmbiguous);
+            }
+            PlatformAttemptResult::Unavailable => {}
         }
+
+        schedule[next_index].next_attempt_idx += 1;
+        let next_attempt_idx = schedule[next_index].next_attempt_idx;
+        if next_attempt_idx >= schedule[next_index].delays.len() {
+            schedule.remove(next_index);
+            continue;
+        }
+        schedule[next_index].next_due =
+            Instant::now() + schedule[next_index].delays[next_attempt_idx];
     }
 
     let status = last_failure
@@ -368,6 +390,36 @@ fn store_profile_update(
         let update: AppProfileUpdate = update_for_method_result(method, result);
         store.merge_update(app, update);
     }
+}
+
+fn build_capture_schedule(
+    methods: &[CaptureMethod],
+    options: &CaptureOptions,
+    start: Instant,
+) -> Vec<ScheduledAttempt> {
+    let mut schedule = Vec::new();
+    for (order, method) in methods.iter().copied().enumerate() {
+        let delays = method.retry_delays(&options.retry_policy);
+        if delays.is_empty() {
+            continue;
+        }
+        schedule.push(ScheduledAttempt {
+            method,
+            delays: delays.to_vec(),
+            next_attempt_idx: 0,
+            next_due: start,
+            order,
+        });
+    }
+    schedule
+}
+
+fn select_next_scheduled_attempt(schedule: &[ScheduledAttempt]) -> Option<usize> {
+    schedule
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, attempt)| (attempt.next_due, attempt.order))
+        .map(|(index, _)| index)
 }
 
 fn finish_success(
@@ -685,6 +737,57 @@ mod tests {
                 )));
             }
             CaptureOutcome::Failure(_) => panic!("expected success"),
+        }
+    }
+
+    #[test]
+    fn probes_other_methods_before_waiting_for_retry_delay() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.test".into(),
+                name: "Test".into(),
+            }),
+            responses: Arc::new(Mutex::new(vec![
+                PlatformAttemptResult::EmptySelection,
+                PlatformAttemptResult::Success("range hit".into()),
+            ])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let store = StubStore;
+        let cancel = NeverCancel;
+        let adapter = NoAdapters;
+        let mut options = CaptureOptions {
+            collect_trace: true,
+            ..CaptureOptions::default()
+        };
+        options.retry_policy.primary_accessibility =
+            vec![Duration::ZERO, Duration::from_millis(60)];
+        options.retry_policy.range_accessibility = vec![Duration::ZERO];
+        options.retry_policy.clipboard = vec![Duration::from_millis(120)];
+
+        let out = capture(&platform, &store, &cancel, &[&adapter], &options);
+        match out {
+            CaptureOutcome::Success(success) => {
+                assert_eq!(success.method, CaptureMethod::AccessibilityRange);
+                assert_eq!(success.text, "range hit");
+                let trace = success.trace.expect("trace");
+                let started_methods: Vec<_> = trace
+                    .events
+                    .iter()
+                    .filter_map(|event| match event {
+                        TraceEvent::MethodStarted(method) => Some(*method),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    started_methods,
+                    vec![
+                        CaptureMethod::AccessibilityPrimary,
+                        CaptureMethod::AccessibilityRange
+                    ]
+                );
+            }
+            other => panic!("expected success, got {other:?}"),
         }
     }
 
