@@ -72,6 +72,19 @@ jobs:
       - name: Build (check mode)
         run: cargo check --verbose
 
+  # Build and test linux-alpha on Ubuntu
+  test-linux-alpha:
+    name: Test (Linux alpha)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run library tests
+        run: cargo test --features linux-alpha --lib --verbose
+      - name: Run linux smoke tests
+        run: cargo test --features linux-alpha --test linux_smoke --verbose
+
   # Security audit
   audit:
     name: Security Audit
