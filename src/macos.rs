@@ -5,6 +5,7 @@ use accessibility_sys_ng::{kAXFocusedUIElementAttribute, kAXSelectedTextAttribut
 use active_win_pos_rs::get_active_window;
 use core_foundation::string::CFString;
 use macos_accessibility_client::accessibility::application_is_trusted;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
@@ -16,6 +17,7 @@ pub struct MacOSPlatform {
 
 pub struct MacOSSelectionMonitor {
     last_emitted: Mutex<Option<String>>,
+    native_event_queue: Mutex<VecDeque<String>>,
     pub poll_interval: Duration,
     backend: MacOSMonitorBackend,
     native_observer_active: bool,
@@ -141,6 +143,7 @@ impl MacOSSelectionMonitor {
 
         Self {
             last_emitted: Mutex::new(None),
+            native_event_queue: Mutex::new(VecDeque::new()),
             poll_interval: options.poll_interval,
             backend: options.backend,
             native_observer_active,
@@ -153,6 +156,22 @@ impl MacOSSelectionMonitor {
 
     pub fn native_observer_active(&self) -> bool {
         self.native_observer_active
+    }
+
+    pub fn enqueue_native_selection_event<T>(&self, text: T) -> bool
+    where
+        T: Into<String>,
+    {
+        let text = text.into();
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        if let Ok(mut queue) = self.native_event_queue.lock() {
+            queue.push_back(trimmed.to_string());
+            return true;
+        }
+        false
     }
 
     fn next_selection_text(&self) -> Option<String> {
@@ -173,17 +192,21 @@ impl MacOSSelectionMonitor {
         if trimmed.is_empty() {
             return None;
         }
-        let next = trimmed.to_string();
+        self.emit_if_new(trimmed.to_string())
+    }
+
+    fn next_selection_text_native(&self) -> Option<String> {
+        let next = self.native_event_queue.lock().ok()?.pop_front()?;
+        self.emit_if_new(next)
+    }
+
+    fn emit_if_new(&self, next: String) -> Option<String> {
         let mut last = self.last_emitted.lock().ok()?;
         if last.as_ref() == Some(&next) {
             return None;
         }
         *last = Some(next.clone());
         Some(next)
-    }
-
-    fn next_selection_text_native(&self) -> Option<String> {
-        None
     }
 }
 
@@ -417,5 +440,30 @@ mod tests {
             MacOSMonitorBackend::NativeObserverPreferred
         );
         assert!(!monitor.native_observer_active());
+    }
+
+    #[test]
+    fn selection_monitor_native_queue_ignores_empty_events() {
+        let monitor = MacOSSelectionMonitor::default();
+
+        assert!(!monitor.enqueue_native_selection_event(""));
+        assert!(!monitor.enqueue_native_selection_event("   "));
+    }
+
+    #[test]
+    fn selection_monitor_native_queue_emits_in_order_and_dedups() {
+        let mut monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(75),
+            backend: MacOSMonitorBackend::NativeObserverPreferred,
+        });
+        monitor.native_observer_active = true;
+
+        assert!(monitor.enqueue_native_selection_event("first"));
+        assert!(monitor.enqueue_native_selection_event("first"));
+        assert!(monitor.enqueue_native_selection_event("second"));
+
+        assert_eq!(monitor.next_selection_text(), Some("first".to_string()));
+        assert_eq!(monitor.next_selection_text(), None);
+        assert_eq!(monitor.next_selection_text(), Some("second".to_string()));
     }
 }

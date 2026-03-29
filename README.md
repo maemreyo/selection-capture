@@ -149,6 +149,7 @@ let _native_pref = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitor
     poll_interval: std::time::Duration::from_millis(120),
     backend: MacOSMonitorBackend::NativeObserverPreferred,
 });
+let _ = _native_pref.enqueue_native_selection_event("hello from observer");
 let cancel = StopImmediately;
 let _processed = mac_monitor.poll_until_cancelled(
     std::time::Duration::from_millis(120),
@@ -183,7 +184,7 @@ let mut metrics = CaptureMetrics::default();
 Current limitations:
 
 - Monitoring backends are polling-based (no native observer callback integration yet)
-- macOS exposes a native-observer scaffold (`NativeObserverPreferred`) that currently falls back to polling
+- macOS exposes a native-observer scaffold (`NativeObserverPreferred`) with a native-event queue and safe polling fallback
 - No async stream integration exists yet
 - `None` from backend is treated as "no more events" by `run(...)` APIs
 - For anti-spam behavior, prefer `poll_until_cancelled_guarded(...)` with `MonitorSpamGuard`

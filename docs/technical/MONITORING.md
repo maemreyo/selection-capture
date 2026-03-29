@@ -13,7 +13,8 @@ What exists today:
   synchronous processing loops.
 - `MacOSSelectionMonitor` provides a first-party macOS monitor backend (polling + de-duplication
   via AX selected-text reads), and exposes a native-observer scaffold mode
-  (`MacOSMonitorBackend::NativeObserverPreferred`) that currently falls back to polling.
+  (`MacOSMonitorBackend::NativeObserverPreferred`) that currently uses a native-event queue with
+  safe fallback to polling.
 - `WindowsSelectionMonitor` (`windows-beta`) provides a Windows polling backend with
   de-duplication using UI Automation/Legacy IAccessible selection reads.
 - `LinuxSelectionMonitor` (`linux-alpha`) provides a Linux polling backend with de-duplication
