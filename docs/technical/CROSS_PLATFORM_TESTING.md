@@ -9,7 +9,7 @@ validated in CI on their native operating systems. The current bounded test matr
 - Windows beta library and smoke tests behind `windows-beta`
 - Linux alpha library and smoke tests behind `linux-alpha`
 
-This keeps placeholder platform work compile-safe while still exercising engine fallback behavior
+This keeps feature-gated platform work compile-safe while still exercising engine fallback behavior
 in realistic OS-specific jobs.
 
 ## Local Commands
@@ -69,11 +69,12 @@ Windows and Linux smoke tests follow the same pattern:
 - verify `strategy_override` takes precedence over default method order
 
 These tests do not try to exercise native APIs. Their purpose is to keep the engine contract stable
-while platform backends remain unimplemented.
+while native backend coverage remains partial and platform-dependent.
 
 ## Current Limitations
 
-- CI does not validate real UI Automation, AT-SPI, X11, Wayland, or clipboard integrations yet.
+- CI only partially validates runtime integrations; it does not comprehensively verify UI
+  Automation, AT-SPI, display-server permutations (X11/Wayland), or app-specific permission flows.
 - Cross-platform smoke tests prove engine behavior, not end-user capture success.
 - GUI and permission-specific behavior still requires future native backend work or manual platform
   validation.
