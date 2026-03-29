@@ -288,6 +288,41 @@ fn monitor_poll_until_cancelled_guarded_ignores_flicker_when_not_stable() {
 }
 
 #[test]
+fn monitor_poll_until_cancelled_guarded_with_stats_tracks_drop_reasons() {
+    let platform = StubMonitorPlatform::new(vec![
+        Some("a"), // unstable (requires 2)
+        Some("a"), // emitted
+        Some("a"), // duplicate
+        Some("b"), // unstable
+        Some("c"), // unstable
+        Some("c"), // global interval drop (forced below)
+        None,
+    ]);
+    let monitor = CaptureMonitor::new(platform);
+    let cancel = LoopCancelSignal::new(12);
+    let guard = MonitorSpamGuard {
+        stable_polls_required: 2,
+        suppress_identical: true,
+        min_emit_interval: Duration::from_secs(60),
+        min_emit_interval_same_text: Duration::ZERO,
+        normalize_whitespace: false,
+    };
+
+    let stats = monitor.poll_until_cancelled_guarded_with_stats(
+        Duration::ZERO,
+        &cancel,
+        &guard,
+        |_event| {},
+    );
+
+    assert_eq!(stats.emitted, 1);
+    assert_eq!(stats.dropped_duplicate, 0);
+    assert_eq!(stats.dropped_global_interval, 2);
+    assert_eq!(stats.dropped_same_text_interval, 0);
+    assert_eq!(stats.dropped_unstable, 3);
+}
+
+#[test]
 fn capture_metrics_aggregates_latency_and_status_by_method() {
     let mut metrics = CaptureMetrics::default();
 

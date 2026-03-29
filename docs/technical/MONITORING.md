@@ -78,6 +78,13 @@ impl<P: MonitorPlatform> CaptureMonitor<P> {
         guard: &MonitorSpamGuard,
         on_event: F,
     ) -> usize;
+    pub fn poll_until_cancelled_guarded_with_stats<F: FnMut(String), S: CancelSignal>(
+        &self,
+        poll_interval: Duration,
+        cancel: &S,
+        guard: &MonitorSpamGuard,
+        on_event: F,
+    ) -> MonitorGuardStats;
 }
 
 pub struct MonitorSpamGuard {
@@ -86,6 +93,14 @@ pub struct MonitorSpamGuard {
     pub min_emit_interval_same_text: Duration,
     pub normalize_whitespace: bool,
     pub stable_polls_required: usize,
+}
+
+pub struct MonitorGuardStats {
+    pub emitted: u64,
+    pub dropped_duplicate: u64,
+    pub dropped_global_interval: u64,
+    pub dropped_same_text_interval: u64,
+    pub dropped_unstable: u64,
 }
 ```
 

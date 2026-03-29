@@ -165,6 +165,12 @@ let _guarded = mac_monitor.poll_until_cancelled_guarded(
     &guard,
     |text| println!("de-spammed selection: {text}"),
 );
+let _stats = mac_monitor.poll_until_cancelled_guarded_with_stats(
+    std::time::Duration::from_millis(120),
+    &cancel,
+    &guard,
+    |_text| {},
+);
 
 let mut metrics = CaptureMetrics::default();
 // metrics.record_outcome(&capture_outcome);

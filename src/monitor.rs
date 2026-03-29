@@ -7,6 +7,15 @@ pub struct CaptureMonitor<P> {
     platform: P,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MonitorGuardStats {
+    pub emitted: u64,
+    pub dropped_duplicate: u64,
+    pub dropped_global_interval: u64,
+    pub dropped_same_text_interval: u64,
+    pub dropped_unstable: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MonitorSpamGuard {
     pub suppress_identical: bool,
@@ -150,18 +159,35 @@ where
         poll_interval: Duration,
         cancel: &S,
         guard: &MonitorSpamGuard,
-        mut on_event: F,
+        on_event: F,
     ) -> usize
     where
         F: FnMut(String),
         S: CancelSignal,
     {
-        let mut processed = 0;
+        let stats =
+            self.poll_until_cancelled_guarded_with_stats(poll_interval, cancel, guard, on_event);
+        stats.emitted as usize
+    }
+
+    pub fn poll_until_cancelled_guarded_with_stats<F, S>(
+        &self,
+        poll_interval: Duration,
+        cancel: &S,
+        guard: &MonitorSpamGuard,
+        mut on_event: F,
+    ) -> MonitorGuardStats
+    where
+        F: FnMut(String),
+        S: CancelSignal,
+    {
+        let mut emitted = 0usize;
         let mut last_emit_at: Option<Instant> = None;
         let mut last_emitted_text: Option<String> = None;
         let mut candidate_text: Option<String> = None;
         let mut candidate_count = 0usize;
         let stable_required = guard.stable_polls_required.max(1);
+        let mut stats = MonitorGuardStats::default();
 
         while !cancel.is_cancelled() {
             if let Some(event) = self.next_event() {
@@ -177,6 +203,7 @@ where
                 }
 
                 if candidate_count < stable_required {
+                    stats.dropped_unstable += 1;
                     continue;
                 }
 
@@ -194,12 +221,22 @@ where
                         .unwrap_or(false);
                 let blocked_duplicate = guard.suppress_identical && same_as_last;
 
-                if too_soon_global || too_soon_same || blocked_duplicate {
+                if too_soon_global {
+                    stats.dropped_global_interval += 1;
+                    continue;
+                }
+                if too_soon_same {
+                    stats.dropped_same_text_interval += 1;
+                    continue;
+                }
+                if blocked_duplicate {
+                    stats.dropped_duplicate += 1;
                     continue;
                 }
 
                 on_event(event);
-                processed += 1;
+                emitted += 1;
+                stats.emitted += 1;
                 last_emit_at = Some(now);
                 last_emitted_text = Some(normalized);
                 continue;
@@ -207,7 +244,8 @@ where
             thread::sleep(poll_interval);
         }
 
-        processed
+        debug_assert_eq!(stats.emitted as usize, emitted);
+        stats
     }
 }
 
