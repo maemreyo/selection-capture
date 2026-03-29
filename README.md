@@ -26,11 +26,13 @@ with explicit capture status and trace metadata for app-level UX decisions.
 ## Platform Support
 
 - **macOS**: Fully implemented (`MacOSPlatform`)
-- **Windows**: `windows-beta` feature flag exposes a bounded MVP scaffold with compile-safe dispatch and fallback tests. Current attempts return `Unavailable` until backend implementations land.
+- **Windows**: `windows-beta` includes real clipboard reads, foreground active-app lookup, and initial UIA + legacy IAccessible focused-element capture paths
+- **Linux**: `linux-alpha` includes shell-backed clipboard/primary-selection reads, active-app lookup, and AT-SPI focused-descendant capture
 - **Other platforms**: Portable API via `CapturePlatform` trait, implementations welcome!
 
-Experimental monitoring support is currently backend-agnostic only. The crate now exposes a
-generic `MonitorPlatform` trait plus `CaptureMonitor<P>`, but no OS-specific monitor backend is
+Experimental monitoring support is currently backend-agnostic only. The crate exposes a generic
+`MonitorPlatform` trait plus `CaptureMonitor<P>`, and `CaptureMetrics` for aggregating
+capture-outcome success/latency statistics from trace data. No OS-specific monitor backend is
 wired yet, so event production depends entirely on user-supplied implementations.
 
 ## Installation
@@ -117,7 +119,7 @@ fn main() {
 ### Experimental Monitoring
 
 ```rust
-use selection_capture::{CaptureMonitor, MonitorPlatform};
+use selection_capture::{CaptureMetrics, CaptureMonitor, MonitorPlatform};
 
 struct StubMonitor;
 
@@ -129,6 +131,9 @@ impl MonitorPlatform for StubMonitor {
 
 let monitor = CaptureMonitor::new(StubMonitor);
 assert_eq!(monitor.next_event(), Some("example selection".to_string()));
+
+let mut metrics = CaptureMetrics::default();
+// metrics.record_outcome(&capture_outcome);
 ```
 
 Current limitations:

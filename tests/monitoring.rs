@@ -1,6 +1,11 @@
-use selection_capture::{CaptureMonitor, MonitorPlatform};
+use selection_capture::{
+    CaptureFailure, CaptureFailureContext, CaptureMethod, CaptureMetrics, CaptureMonitor,
+    CaptureOutcome, CaptureStatus, CaptureSuccess, CaptureTrace, CleanupStatus, FailureKind,
+    MonitorPlatform, TraceEvent,
+};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[derive(Clone)]
 struct StubMonitorPlatform {
@@ -34,4 +39,86 @@ fn monitor_emits_events_in_backend_order() {
     assert_eq!(monitor.next_event(), Some("first".to_string()));
     assert_eq!(monitor.next_event(), Some("second".to_string()));
     assert_eq!(monitor.next_event(), None);
+}
+
+#[test]
+fn capture_metrics_aggregates_latency_and_status_by_method() {
+    let mut metrics = CaptureMetrics::default();
+
+    let success_outcome = CaptureOutcome::Success(CaptureSuccess {
+        text: "hello".to_string(),
+        method: CaptureMethod::AccessibilityPrimary,
+        trace: Some(CaptureTrace {
+            events: vec![
+                TraceEvent::MethodStarted(CaptureMethod::AccessibilityPrimary),
+                TraceEvent::MethodFinished {
+                    method: CaptureMethod::AccessibilityPrimary,
+                    elapsed: Duration::from_millis(25),
+                },
+                TraceEvent::MethodSucceeded(CaptureMethod::AccessibilityPrimary),
+                TraceEvent::CleanupFinished(CleanupStatus::Clean),
+            ],
+            cleanup_status: CleanupStatus::Clean,
+            total_elapsed: Duration::from_millis(40),
+        }),
+    });
+
+    let failure_outcome = CaptureOutcome::Failure(CaptureFailure {
+        status: CaptureStatus::TimedOut,
+        hint: None,
+        trace: Some(CaptureTrace {
+            events: vec![
+                TraceEvent::MethodStarted(CaptureMethod::ClipboardBorrow),
+                TraceEvent::MethodFinished {
+                    method: CaptureMethod::ClipboardBorrow,
+                    elapsed: Duration::from_millis(80),
+                },
+                TraceEvent::MethodFailed {
+                    method: CaptureMethod::ClipboardBorrow,
+                    kind: FailureKind::TimedOut,
+                },
+                TraceEvent::TimedOut,
+                TraceEvent::CleanupFinished(CleanupStatus::Clean),
+            ],
+            cleanup_status: CleanupStatus::Clean,
+            total_elapsed: Duration::from_millis(100),
+        }),
+        cleanup_failed: false,
+        context: CaptureFailureContext {
+            status: CaptureStatus::TimedOut,
+            active_app: None,
+            methods_tried: vec![CaptureMethod::ClipboardBorrow],
+            last_method: Some(CaptureMethod::ClipboardBorrow),
+        },
+    });
+
+    metrics.record_outcome(&success_outcome);
+    metrics.record_outcome(&failure_outcome);
+
+    assert_eq!(metrics.total_captures, 2);
+    assert_eq!(metrics.successes, 1);
+    assert_eq!(metrics.failures, 1);
+    assert_eq!(metrics.timed_out, 1);
+    assert_eq!(metrics.cancelled, 0);
+    assert_eq!(metrics.total_latency, Duration::from_millis(140));
+    assert_eq!(metrics.average_latency(), Duration::from_millis(70));
+    assert_eq!(metrics.overall_success_rate(), 0.5);
+
+    let primary = metrics
+        .method_metrics(CaptureMethod::AccessibilityPrimary)
+        .expect("primary method metrics");
+    assert_eq!(primary.attempts, 1);
+    assert_eq!(primary.successes, 1);
+    assert_eq!(primary.failures, 0);
+    assert_eq!(primary.empty_results, 0);
+    assert_eq!(primary.total_latency, Duration::from_millis(25));
+
+    let clipboard = metrics
+        .method_metrics(CaptureMethod::ClipboardBorrow)
+        .expect("clipboard method metrics");
+    assert_eq!(clipboard.attempts, 1);
+    assert_eq!(clipboard.successes, 0);
+    assert_eq!(clipboard.failures, 1);
+    assert_eq!(clipboard.empty_results, 0);
+    assert_eq!(clipboard.total_latency, Duration::from_millis(80));
 }
