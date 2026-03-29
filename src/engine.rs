@@ -1,4 +1,4 @@
-use crate::cache::prioritize_profile_method;
+use crate::cache::{prioritize_profile_method, record_method_outcome};
 use crate::profile::AppProfileUpdate;
 use crate::traits::{AppAdapter, AppProfileStore, CancelSignal, CapturePlatform};
 use crate::types::{
@@ -389,6 +389,7 @@ fn store_profile_update(
     result: &PlatformAttemptResult,
 ) {
     if let Some(app) = active_app {
+        record_method_outcome(&app.bundle_id, method, result);
         let update: AppProfileUpdate = update_for_method_result(method, result);
         store.merge_update(app, update);
     }
@@ -538,6 +539,7 @@ fn min_duration(a: Duration, b: Duration) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::{adaptive_history_test_lock, reset_adaptive_history_for_tests};
     use crate::profile::{AppProfile, AppProfileUpdate};
     use crate::traits::{AppAdapter, AppProfileStore, CancelSignal, CapturePlatform};
     use crate::types::{
@@ -603,8 +605,17 @@ mod tests {
         }
     }
 
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        let guard = adaptive_history_test_lock()
+            .lock()
+            .expect("test lock poisoned");
+        reset_adaptive_history_for_tests();
+        guard
+    }
+
     #[test]
     fn collect_trace_true_always_returns_trace() {
+        let _guard = test_guard();
         let platform = StubPlatform {
             app: Some(ActiveApp {
                 bundle_id: "app.test".into(),
@@ -634,6 +645,7 @@ mod tests {
 
     #[test]
     fn capture_trace_records_method_timing_and_total_elapsed() {
+        let _guard = test_guard();
         let platform = StubPlatform {
             app: Some(ActiveApp {
                 bundle_id: "app.test".into(),
@@ -679,6 +691,7 @@ mod tests {
 
     #[test]
     fn skips_retry_when_budget_is_too_small() {
+        let _guard = test_guard();
         let platform = StubPlatform {
             app: Some(ActiveApp {
                 bundle_id: "app.test".into(),
@@ -711,6 +724,7 @@ mod tests {
 
     #[test]
     fn falls_through_to_clipboard_after_ax_returns_empty_or_unavailable() {
+        let _guard = test_guard();
         let platform = StubPlatform {
             app: Some(ActiveApp {
                 bundle_id: "app.test".into(),
@@ -754,9 +768,10 @@ mod tests {
 
     #[test]
     fn probes_other_methods_before_waiting_for_retry_delay() {
+        let _guard = test_guard();
         let platform = StubPlatform {
             app: Some(ActiveApp {
-                bundle_id: "app.test".into(),
+                bundle_id: "app.test.interleave".into(),
                 name: "Test".into(),
             }),
             responses: Arc::new(Mutex::new(vec![
@@ -806,9 +821,10 @@ mod tests {
 
     #[test]
     fn capture_can_disable_interleaving_and_keep_sequential_retry_order() {
+        let _guard = test_guard();
         let platform = StubPlatform {
             app: Some(ActiveApp {
-                bundle_id: "app.test".into(),
+                bundle_id: "app.test.sequential".into(),
                 name: "Test".into(),
             }),
             responses: Arc::new(Mutex::new(vec![
@@ -859,6 +875,7 @@ mod tests {
 
     #[test]
     fn try_capture_returns_would_block_when_later_method_requires_delay() {
+        let _guard = test_guard();
         let platform = StubPlatform {
             app: Some(ActiveApp {
                 bundle_id: "app.test".into(),
@@ -885,6 +902,7 @@ mod tests {
 
     #[test]
     fn try_capture_succeeds_immediately_when_primary_method_succeeds() {
+        let _guard = test_guard();
         let platform = StubPlatform {
             app: Some(ActiveApp {
                 bundle_id: "app.test".into(),
@@ -916,6 +934,7 @@ mod tests {
 
     #[test]
     fn try_capture_trace_records_method_timing_and_total_elapsed() {
+        let _guard = test_guard();
         let platform = StubPlatform {
             app: Some(ActiveApp {
                 bundle_id: "app.test".into(),
@@ -962,6 +981,7 @@ mod tests {
 
     #[test]
     fn try_capture_returns_failure_when_all_immediate_methods_are_exhausted() {
+        let _guard = test_guard();
         let platform = StubPlatform {
             app: Some(ActiveApp {
                 bundle_id: "app.test".into(),
