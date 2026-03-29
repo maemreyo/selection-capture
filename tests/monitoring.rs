@@ -1,9 +1,10 @@
 use selection_capture::{
-    CaptureFailure, CaptureFailureContext, CaptureMethod, CaptureMetrics, CaptureMonitor,
-    CaptureOutcome, CaptureStatus, CaptureSuccess, CaptureTrace, CleanupStatus, FailureKind,
-    MonitorPlatform, TraceEvent,
+    CancelSignal, CaptureFailure, CaptureFailureContext, CaptureMethod, CaptureMetrics,
+    CaptureMonitor, CaptureOutcome, CaptureStatus, CaptureSuccess, CaptureTrace, CleanupStatus,
+    FailureKind, MonitorPlatform, TraceEvent,
 };
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -28,6 +29,26 @@ impl StubMonitorPlatform {
 impl MonitorPlatform for StubMonitorPlatform {
     fn next_selection_change(&self) -> Option<String> {
         self.events.lock().unwrap().pop_front().flatten()
+    }
+}
+
+struct LoopCancelSignal {
+    checks: AtomicUsize,
+    cancel_after: usize,
+}
+
+impl LoopCancelSignal {
+    fn new(cancel_after: usize) -> Self {
+        Self {
+            checks: AtomicUsize::new(0),
+            cancel_after,
+        }
+    }
+}
+
+impl CancelSignal for LoopCancelSignal {
+    fn is_cancelled(&self) -> bool {
+        self.checks.fetch_add(1, Ordering::SeqCst) >= self.cancel_after
     }
 }
 
@@ -95,6 +116,38 @@ fn monitor_poll_until_continues_across_empty_polls() {
 
     assert_eq!(processed, 2);
     assert_eq!(observed, vec!["first".to_string(), "second".to_string()]);
+}
+
+#[test]
+fn monitor_poll_until_cancelled_stops_via_cancel_signal() {
+    let platform = StubMonitorPlatform::new(vec![None, Some("first"), None, Some("second"), None]);
+    let monitor = CaptureMonitor::new(platform);
+    let cancel = LoopCancelSignal::new(6);
+    let mut observed = Vec::new();
+
+    let processed =
+        monitor.poll_until_cancelled(Duration::ZERO, &cancel, |event| observed.push(event));
+
+    assert_eq!(processed, 2);
+    assert_eq!(observed, vec!["first".to_string(), "second".to_string()]);
+}
+
+#[test]
+fn monitor_poll_until_cancelled_coalesced_suppresses_burst_events() {
+    let platform = StubMonitorPlatform::new(vec![Some("a"), Some("b"), Some("c"), None, None]);
+    let monitor = CaptureMonitor::new(platform);
+    let cancel = LoopCancelSignal::new(6);
+    let mut observed = Vec::new();
+
+    let processed = monitor.poll_until_cancelled_coalesced(
+        Duration::ZERO,
+        Duration::from_secs(60),
+        &cancel,
+        |event| observed.push(event),
+    );
+
+    assert_eq!(processed, 1);
+    assert_eq!(observed, vec!["a".to_string()]);
 }
 
 #[test]

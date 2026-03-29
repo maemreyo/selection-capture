@@ -8,7 +8,8 @@ What exists today:
 
 - `MonitorPlatform` defines the minimal backend contract for selection-change polling.
 - `CaptureMonitor<P>` wraps a backend and exposes `next_event()`, `run()`, `run_with_limit()`,
-  `collect_events()`, and `poll_until()` helpers for synchronous processing loops.
+  `collect_events()`, `poll_until()`, `poll_until_cancelled()`, and
+  `poll_until_cancelled_coalesced()` helpers for synchronous processing loops.
 - `MacOSSelectionMonitor` provides a first-party macOS monitor backend (polling + de-duplication
   via AX selected-text reads).
 - Integration coverage exists for ordered event delivery through a stub backend.
@@ -18,7 +19,8 @@ What does not exist yet:
 - Built-in Windows monitoring hooks
 - Built-in Linux monitoring hooks
 - Async streams, channels, or subscription orchestration
-- Permission handling, lifecycle management, or debounce/coalescing logic
+- Native observer/event-subscription lifecycle management
+- Debounce semantics (current coalescing support is interval-throttling)
 
 ## Scope
 
@@ -52,6 +54,19 @@ impl<P: MonitorPlatform> CaptureMonitor<P> {
         should_continue: C,
         on_event: F,
     ) -> usize;
+    pub fn poll_until_cancelled<F: FnMut(String), S: CancelSignal>(
+        &self,
+        poll_interval: Duration,
+        cancel: &S,
+        on_event: F,
+    ) -> usize;
+    pub fn poll_until_cancelled_coalesced<F: FnMut(String), S: CancelSignal>(
+        &self,
+        poll_interval: Duration,
+        min_emit_interval: Duration,
+        cancel: &S,
+        on_event: F,
+    ) -> usize;
 }
 ```
 
@@ -76,3 +91,4 @@ adaptation, or cancellation. That work is intentionally deferred until native ho
 - The wrapper does not own background tasks or event subscriptions
 - The API does not distinguish "no event yet" from "monitor exhausted"
 - macOS implementation is polling-based, not callback-based (`AXObserver`) yet
+- Coalescing mode intentionally drops events inside the emit interval window

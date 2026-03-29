@@ -1,7 +1,7 @@
-use crate::traits::MonitorPlatform;
+use crate::traits::{CancelSignal, MonitorPlatform};
 use crate::types::{CaptureMethod, CaptureOutcome, CaptureStatus, TraceEvent};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub struct CaptureMonitor<P> {
     platform: P,
@@ -76,6 +76,51 @@ where
             }
             thread::sleep(poll_interval);
         }
+        processed
+    }
+
+    pub fn poll_until_cancelled<F, S>(
+        &self,
+        poll_interval: Duration,
+        cancel: &S,
+        on_event: F,
+    ) -> usize
+    where
+        F: FnMut(String),
+        S: CancelSignal,
+    {
+        self.poll_until(poll_interval, || !cancel.is_cancelled(), on_event)
+    }
+
+    pub fn poll_until_cancelled_coalesced<F, S>(
+        &self,
+        poll_interval: Duration,
+        min_emit_interval: Duration,
+        cancel: &S,
+        mut on_event: F,
+    ) -> usize
+    where
+        F: FnMut(String),
+        S: CancelSignal,
+    {
+        let mut processed = 0;
+        let mut last_emit_at: Option<Instant> = None;
+
+        while !cancel.is_cancelled() {
+            if let Some(event) = self.next_event() {
+                let should_emit = last_emit_at
+                    .map(|last| last.elapsed() >= min_emit_interval)
+                    .unwrap_or(true);
+                if should_emit {
+                    on_event(event);
+                    processed += 1;
+                    last_emit_at = Some(Instant::now());
+                }
+                continue;
+            }
+            thread::sleep(poll_interval);
+        }
+
         processed
     }
 }

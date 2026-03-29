@@ -33,7 +33,8 @@ with explicit capture status and trace metadata for app-level UX decisions.
 Experimental monitoring support is scaffolded with a generic `MonitorPlatform` trait plus
 `CaptureMonitor<P>`, and `CaptureMetrics` for aggregating capture-outcome success/latency
 statistics from trace data. A first macOS monitor backend (`MacOSSelectionMonitor`) is available
-for AX selected-text polling with de-duplication.
+for AX selected-text polling with de-duplication. Poll helpers now include cancellation-aware
+loops and an optional coalescing mode for bursty event streams.
 
 ## Installation
 
@@ -119,7 +120,9 @@ fn main() {
 ### Experimental Monitoring
 
 ```rust
-use selection_capture::{CaptureMetrics, CaptureMonitor, MacOSSelectionMonitor, MonitorPlatform};
+use selection_capture::{
+    CancelSignal, CaptureMetrics, CaptureMonitor, MacOSSelectionMonitor, MonitorPlatform,
+};
 
 struct StubMonitor;
 
@@ -134,10 +137,16 @@ assert_eq!(monitor.next_event(), Some("example selection".to_string()));
 let processed = monitor.run_with_limit(10, |text| println!("selection: {text}"));
 assert_eq!(processed, 1);
 
+struct StopImmediately;
+impl CancelSignal for StopImmediately {
+    fn is_cancelled(&self) -> bool { true }
+}
+
 let mac_monitor = CaptureMonitor::new(MacOSSelectionMonitor::default());
-let _processed = mac_monitor.poll_until(
+let cancel = StopImmediately;
+let _processed = mac_monitor.poll_until_cancelled(
     std::time::Duration::from_millis(120),
-    || false, // replace with your own cancellation condition
+    &cancel, // replace with your own cancellation signal
     |text| println!("live selection: {text}"),
 );
 
