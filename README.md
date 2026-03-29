@@ -30,10 +30,10 @@ with explicit capture status and trace metadata for app-level UX decisions.
 - **Linux**: `linux-alpha` includes shell-backed clipboard/primary-selection reads, active-app lookup, and AT-SPI focused-descendant capture
 - **Other platforms**: Portable API via `CapturePlatform` trait, implementations welcome!
 
-Experimental monitoring support is currently backend-agnostic only. The crate exposes a generic
-`MonitorPlatform` trait plus `CaptureMonitor<P>`, and `CaptureMetrics` for aggregating
-capture-outcome success/latency statistics from trace data. No OS-specific monitor backend is
-wired yet, so event production depends entirely on user-supplied implementations.
+Experimental monitoring support is scaffolded with a generic `MonitorPlatform` trait plus
+`CaptureMonitor<P>`, and `CaptureMetrics` for aggregating capture-outcome success/latency
+statistics from trace data. A first macOS monitor backend (`MacOSSelectionMonitor`) is available
+for AX selected-text polling with de-duplication.
 
 ## Installation
 
@@ -119,7 +119,7 @@ fn main() {
 ### Experimental Monitoring
 
 ```rust
-use selection_capture::{CaptureMetrics, CaptureMonitor, MonitorPlatform};
+use selection_capture::{CaptureMetrics, CaptureMonitor, MacOSSelectionMonitor, MonitorPlatform};
 
 struct StubMonitor;
 
@@ -134,15 +134,22 @@ assert_eq!(monitor.next_event(), Some("example selection".to_string()));
 let processed = monitor.run_with_limit(10, |text| println!("selection: {text}"));
 assert_eq!(processed, 1);
 
+let mac_monitor = CaptureMonitor::new(MacOSSelectionMonitor::default());
+let _processed = mac_monitor.poll_until(
+    std::time::Duration::from_millis(120),
+    || false, // replace with your own cancellation condition
+    |text| println!("live selection: {text}"),
+);
+
 let mut metrics = CaptureMetrics::default();
 // metrics.record_outcome(&capture_outcome);
 ```
 
 Current limitations:
 
-- No built-in macOS, Windows, or Linux monitoring backend exists yet
+- `MacOSSelectionMonitor` uses polling + de-duplication, not native AXObserver callbacks yet
+- No built-in Windows or Linux monitoring backend exists yet
 - No async stream integration exists yet
-- No OS event subscription, lifecycle, or permission handling is implemented yet
 - `None` from backend is treated as "no more events" by `run(...)` APIs
 
 ### Return Types

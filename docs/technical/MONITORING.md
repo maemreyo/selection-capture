@@ -8,12 +8,13 @@ What exists today:
 
 - `MonitorPlatform` defines the minimal backend contract for selection-change polling.
 - `CaptureMonitor<P>` wraps a backend and exposes `next_event()`, `run()`, `run_with_limit()`,
-  and `collect_events()` helpers for synchronous processing loops.
+  `collect_events()`, and `poll_until()` helpers for synchronous processing loops.
+- `MacOSSelectionMonitor` provides a first-party macOS monitor backend (polling + de-duplication
+  via AX selected-text reads).
 - Integration coverage exists for ordered event delivery through a stub backend.
 
 What does not exist yet:
 
-- Built-in macOS monitoring hooks
 - Built-in Windows monitoring hooks
 - Built-in Linux monitoring hooks
 - Async streams, channels, or subscription orchestration
@@ -45,6 +46,12 @@ impl<P: MonitorPlatform> CaptureMonitor<P> {
     pub fn run<F: FnMut(String)>(&self, on_event: F) -> usize;
     pub fn run_with_limit<F: FnMut(String)>(&self, max_events: usize, on_event: F) -> usize;
     pub fn collect_events(&self, max_events: usize) -> Vec<String>;
+    pub fn poll_until<F: FnMut(String), C: FnMut() -> bool>(
+        &self,
+        poll_interval: Duration,
+        should_continue: C,
+        on_event: F,
+    ) -> usize;
 }
 ```
 
@@ -68,4 +75,4 @@ adaptation, or cancellation. That work is intentionally deferred until native ho
 - There is no timestamp, source app, or method metadata
 - The wrapper does not own background tasks or event subscriptions
 - The API does not distinguish "no event yet" from "monitor exhausted"
-- No platform implementation ships in the crate today
+- macOS implementation is polling-based, not callback-based (`AXObserver`) yet

@@ -1,5 +1,6 @@
 use crate::traits::MonitorPlatform;
 use crate::types::{CaptureMethod, CaptureOutcome, CaptureStatus, TraceEvent};
+use std::thread;
 use std::time::Duration;
 
 pub struct CaptureMonitor<P> {
@@ -54,6 +55,28 @@ where
         let mut events = Vec::new();
         self.run_with_limit(max_events, |event| events.push(event));
         events
+    }
+
+    pub fn poll_until<F, C>(
+        &self,
+        poll_interval: Duration,
+        mut should_continue: C,
+        mut on_event: F,
+    ) -> usize
+    where
+        F: FnMut(String),
+        C: FnMut() -> bool,
+    {
+        let mut processed = 0;
+        while should_continue() {
+            if let Some(event) = self.next_event() {
+                on_event(event);
+                processed += 1;
+                continue;
+            }
+            thread::sleep(poll_interval);
+        }
+        processed
     }
 }
 

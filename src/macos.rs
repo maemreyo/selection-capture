@@ -1,4 +1,4 @@
-use crate::traits::CapturePlatform;
+use crate::traits::{CapturePlatform, MonitorPlatform};
 use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
 use accessibility_ng::{AXAttribute, AXUIElement};
 use accessibility_sys_ng::{kAXFocusedUIElementAttribute, kAXSelectedTextAttribute};
@@ -8,14 +8,26 @@ use macos_accessibility_client::accessibility::application_is_trusted;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
+use std::time::Duration;
 
 pub struct MacOSPlatform {
     cleanup_status: Mutex<CleanupStatus>,
 }
 
+pub struct MacOSSelectionMonitor {
+    last_emitted: Mutex<Option<String>>,
+    pub poll_interval: Duration,
+}
+
 impl Default for MacOSPlatform {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Default for MacOSSelectionMonitor {
+    fn default() -> Self {
+        Self::new(Duration::from_millis(120))
     }
 }
 
@@ -90,6 +102,33 @@ impl MacOSPlatform {
     }
 }
 
+impl MacOSSelectionMonitor {
+    pub fn new(poll_interval: Duration) -> Self {
+        Self {
+            last_emitted: Mutex::new(None),
+            poll_interval,
+        }
+    }
+
+    fn next_selection_text(&self) -> Option<String> {
+        if !application_is_trusted() {
+            return None;
+        }
+        let text = get_selected_text_by_ax().ok()?;
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let next = trimmed.to_string();
+        let mut last = self.last_emitted.lock().ok()?;
+        if last.as_ref() == Some(&next) {
+            return None;
+        }
+        *last = Some(next.clone());
+        Some(next)
+    }
+}
+
 impl CapturePlatform for MacOSPlatform {
     fn active_app(&self) -> Option<ActiveApp> {
         self.active_app_inner()
@@ -110,6 +149,12 @@ impl CapturePlatform for MacOSPlatform {
         let status = *guard;
         *guard = CleanupStatus::Clean;
         status
+    }
+}
+
+impl MonitorPlatform for MacOSSelectionMonitor {
+    fn next_selection_change(&self) -> Option<String> {
+        self.next_selection_text()
     }
 }
 
@@ -287,5 +332,11 @@ mod tests {
         let path = PathBuf::from("/usr/local/bin/code");
         let bundle = bundle_id_from_process_path(&path);
         assert_eq!(bundle, "/usr/local/bin/code");
+    }
+
+    #[test]
+    fn selection_monitor_default_poll_interval_is_stable() {
+        let monitor = MacOSSelectionMonitor::default();
+        assert_eq!(monitor.poll_interval, Duration::from_millis(120));
     }
 }

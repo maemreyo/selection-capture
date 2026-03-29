@@ -78,6 +78,26 @@ fn monitor_collect_events_returns_bounded_batch() {
 }
 
 #[test]
+fn monitor_poll_until_continues_across_empty_polls() {
+    let platform = StubMonitorPlatform::new(vec![None, Some("first"), None, Some("second"), None]);
+    let monitor = CaptureMonitor::new(platform);
+    let mut observed = Vec::new();
+    let mut loops = 0usize;
+
+    let processed = monitor.poll_until(
+        Duration::ZERO,
+        || {
+            loops += 1;
+            loops <= 5
+        },
+        |event| observed.push(event),
+    );
+
+    assert_eq!(processed, 2);
+    assert_eq!(observed, vec!["first".to_string(), "second".to_string()]);
+}
+
+#[test]
 fn capture_metrics_aggregates_latency_and_status_by_method() {
     let mut metrics = CaptureMetrics::default();
 
