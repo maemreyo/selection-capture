@@ -23,6 +23,7 @@ pub struct MacOSSelectionMonitor {
     pub poll_interval: Duration,
     backend: MacOSMonitorBackend,
     native_observer_active: bool,
+    native_event_pump: Option<MacOSNativeEventPump>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,12 +39,15 @@ pub enum MacOSMonitorBackend {
     NativeObserverPreferred,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub struct MacOSSelectionMonitorOptions {
     pub poll_interval: Duration,
     pub backend: MacOSMonitorBackend,
     pub native_queue_capacity: usize,
+    pub native_event_pump: Option<MacOSNativeEventPump>,
 }
+
+pub type MacOSNativeEventPump = fn() -> Vec<String>;
 
 impl Default for MacOSPlatform {
     fn default() -> Self {
@@ -63,6 +67,7 @@ impl Default for MacOSSelectionMonitorOptions {
             poll_interval: Duration::from_millis(120),
             backend: MacOSMonitorBackend::Polling,
             native_queue_capacity: 256,
+            native_event_pump: None,
         }
     }
 }
@@ -144,6 +149,7 @@ impl MacOSSelectionMonitor {
             poll_interval,
             backend: MacOSMonitorBackend::Polling,
             native_queue_capacity: 256,
+            native_event_pump: None,
         })
     }
 
@@ -161,6 +167,7 @@ impl MacOSSelectionMonitor {
             poll_interval: options.poll_interval,
             backend: options.backend,
             native_observer_active,
+            native_event_pump: options.native_event_pump,
         }
     }
 
@@ -233,8 +240,17 @@ impl MacOSSelectionMonitor {
             .unwrap_or(0)
     }
 
+    pub fn poll_native_event_pump_once(&self) -> usize {
+        let Some(pump) = self.native_event_pump else {
+            return 0;
+        };
+        let events = pump();
+        self.enqueue_native_selection_events(events)
+    }
+
     fn next_selection_text(&self) -> Option<String> {
         if self.native_observer_active {
+            let _ = self.poll_native_event_pump_once();
             if let Some(event) = self.next_selection_text_native() {
                 return Some(event);
             }
@@ -463,6 +479,25 @@ return "STATUS:OK" & linefeed & theSelectedText
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+    use std::sync::OnceLock;
+
+    fn native_pump_batches() -> &'static Mutex<VecDeque<Vec<String>>> {
+        static BATCHES: OnceLock<Mutex<VecDeque<Vec<String>>>> = OnceLock::new();
+        BATCHES.get_or_init(|| Mutex::new(VecDeque::new()))
+    }
+
+    fn push_native_pump_batch(batch: Vec<String>) {
+        native_pump_batches().lock().unwrap().push_back(batch);
+    }
+
+    fn test_native_event_pump() -> Vec<String> {
+        native_pump_batches()
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or_default()
+    }
 
     #[test]
     fn bundle_root_uses_app_ancestor_when_present() {
@@ -492,6 +527,7 @@ mod tests {
             poll_interval: Duration::from_millis(75),
             backend: MacOSMonitorBackend::NativeObserverPreferred,
             native_queue_capacity: 256,
+            native_event_pump: None,
         });
 
         assert_eq!(monitor.poll_interval, Duration::from_millis(75));
@@ -516,6 +552,7 @@ mod tests {
             poll_interval: Duration::from_millis(75),
             backend: MacOSMonitorBackend::NativeObserverPreferred,
             native_queue_capacity: 256,
+            native_event_pump: None,
         });
         monitor.native_observer_active = true;
 
@@ -534,6 +571,7 @@ mod tests {
             poll_interval: Duration::from_millis(50),
             backend: MacOSMonitorBackend::Polling,
             native_queue_capacity: 2,
+            native_event_pump: None,
         });
 
         assert!(monitor.enqueue_native_selection_event("a"));
@@ -550,6 +588,7 @@ mod tests {
             poll_interval: Duration::from_millis(50),
             backend: MacOSMonitorBackend::Polling,
             native_queue_capacity: 4,
+            native_event_pump: None,
         });
 
         let accepted =
@@ -566,6 +605,7 @@ mod tests {
             poll_interval: Duration::from_millis(50),
             backend: MacOSMonitorBackend::NativeObserverPreferred,
             native_queue_capacity: 2,
+            native_event_pump: None,
         });
         monitor.native_observer_active = true;
 
@@ -586,5 +626,25 @@ mod tests {
         assert_eq!(monitor.next_selection_text(), Some("second".to_string()));
         assert_eq!(monitor.next_selection_text(), Some("third".to_string()));
         assert_eq!(monitor.next_selection_text(), None);
+    }
+
+    #[test]
+    fn selection_monitor_native_event_pump_feeds_queue_with_backpressure_rules() {
+        push_native_pump_batch(vec!["a".into(), "a".into(), "b".into()]);
+        push_native_pump_batch(vec!["c".into()]);
+
+        let mut monitor = MacOSSelectionMonitor::new_with_options(MacOSSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(50),
+            backend: MacOSMonitorBackend::NativeObserverPreferred,
+            native_queue_capacity: 3,
+            native_event_pump: Some(test_native_event_pump),
+        });
+        monitor.native_observer_active = true;
+
+        assert_eq!(monitor.next_selection_text(), Some("a".to_string()));
+        assert_eq!(monitor.next_selection_text(), Some("b".to_string()));
+        assert_eq!(monitor.next_selection_text(), Some("c".to_string()));
+        assert_eq!(monitor.next_selection_text(), None);
+        assert_eq!(monitor.native_events_dropped(), 0);
     }
 }

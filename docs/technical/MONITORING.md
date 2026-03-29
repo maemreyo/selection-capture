@@ -15,7 +15,8 @@ What exists today:
   via AX selected-text reads), and exposes a native-observer scaffold mode
   (`MacOSMonitorBackend::NativeObserverPreferred`) that currently uses a bounded native-event
   queue (tail de-dup + drop counter) with safe fallback to polling, plus callback ingress API
-  (`ingest_native_observer_payload(...)`) for future AXObserver wiring.
+  (`ingest_native_observer_payload(...)`) and an optional native pump hook
+  (`native_event_pump`) for future AXObserver wiring.
 - `WindowsSelectionMonitor` (`windows-beta`) provides a Windows polling backend with
   de-duplication using UI Automation/Legacy IAccessible selection reads.
 - `LinuxSelectionMonitor` (`linux-alpha`) provides a Linux polling backend with de-duplication

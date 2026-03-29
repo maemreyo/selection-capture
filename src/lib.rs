@@ -21,8 +21,8 @@ pub use engine::{capture, try_capture};
 pub use linux::{LinuxPlatform, LinuxSelectionMonitor};
 #[cfg(target_os = "macos")]
 pub use macos::{
-    MacOSMonitorBackend, MacOSNativeEventSource, MacOSPlatform, MacOSSelectionMonitor,
-    MacOSSelectionMonitorOptions,
+    MacOSMonitorBackend, MacOSNativeEventPump, MacOSNativeEventSource, MacOSPlatform,
+    MacOSSelectionMonitor, MacOSSelectionMonitorOptions,
 };
 pub use monitor::{
     CaptureMetrics, CaptureMonitor, MethodMetrics, MonitorGuardStats, MonitorSpamGuard,
