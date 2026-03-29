@@ -1,0 +1,45 @@
+[package]
+name = "selection-capture"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Sync, cancellable selected-text capture engine with strategy-aware fallbacks"
+authors = ["zamery <zaob.ogn@gmail.com>"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/maemreyo/selection-capture"
+homepage = "https://github.com/maemreyo/selection-capture"
+documentation = "https://docs.rs/selection-capture"
+keywords = ["selection", "macos", "accessibility", "clipboard", "capture"]
+categories = ["api-bindings", "os::macos-apis"]
+include = ["src/**", "Cargo.toml", "README.md", "LICENSE*", "SPEC.md"]
+
+[lib]
+name = "selection_capture"
+path = "src/lib.rs"
+
+[features]
+default = []
+
+[package.metadata.docs.rs]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+all-features = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+accessibility-ng = "0.1"
+accessibility-sys-ng = "0.1"
+active-win-pos-rs = "0.8"
+core-foundation = "0.9.4"
+macos-accessibility-client = "0.0.1"
+
+[dev-dependencies]
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = 'abort'
+strip = true

@@ -1,0 +1,75 @@
+# Configuration for cargo-release
+# https://github.com/crate-ci/cargo-release
+
+[package]
+# Pre-release commit message
+pre-release-commit-message = "release: {{version}}"
+
+# Tag message
+tag-message = "Release {{version}}"
+
+# Tag prefix (e.g., "v" creates tags like v1.0.0)
+tag-prefix = "v"
+
+# Enable or disable publishing to crates.io
+publish = true
+
+# Enable or disable pushing git changes
+push = true
+
+# Run cargo verify before release
+verify = true
+
+# Skip running tests (not recommended)
+skip-tests = false
+
+# Allow dirty working directory (uncommitted changes)
+allow-dirty = false
+
+# Branch to release from
+main-branch = "main"
+
+# Remote to push to
+remote = "origin"
+
+# Changelog configuration
+changelog = "CHANGELOG.md"
+
+# Post-release hook - runs after release is complete
+# You can add notifications, deployment triggers, etc.
+post-release-hook = ["sh", "-c", "echo 'Release {{version}} completed!'"]
+
+# Dry run by default (safer)
+dry-run = false
+
+# Sign commits and tags
+sign = false
+
+# Enable verbose output
+verbose = true
+
+# Release type (default: automatic based on commits)
+# Options: major, minor, patch, rc, alpha, beta
+release-type = "auto"
+
+# Pre-release identifier (for rc, alpha, beta)
+# e.g., "rc.1", "alpha.2", "beta.3"
+pre-release-identifier = ""
+
+# Bump dependencies to latest versions
+bump-dependencies = false
+
+# Enable features during build
+features = []
+
+# Enable all features during build
+all-features = false
+
+# No default features during build
+no-default-features = false
+
+# Build arguments
+build-args = []
+
+# Custom version separator (for monorepos)
+version-separator = "."

@@ -1,0 +1,45 @@
+# Build artifacts
+/target/
+**/target/
+
+# Dependency directories
+**/deps/
+
+# Lock file (optional, can be committed for binaries)
+/Cargo.lock
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.rs.bk
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Test coverage
+*.gcno
+*.gcda
+coverage/
+tarpaulin-report.html
+
+# Examples and demos
+/examples/*/target/
+/demos/*/target/
+
+# Documentation build
+/doc/
+
+# Environment
+.env
+.env.local
