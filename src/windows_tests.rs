@@ -123,13 +123,12 @@ fn selection_monitor_native_preferred_releases_bridge_on_drop() {
     let _ = WindowsObserverBridge::stop();
 
     {
-        let _monitor =
-            WindowsSelectionMonitor::new_with_options(WindowsSelectionMonitorOptions {
-                poll_interval: Duration::from_millis(10),
-                backend: WindowsMonitorBackend::NativeEventPreferred,
-                native_queue_capacity: 8,
-                native_event_pump: None,
-            });
+        let _monitor = WindowsSelectionMonitor::new_with_options(WindowsSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(10),
+            backend: WindowsMonitorBackend::NativeEventPreferred,
+            native_queue_capacity: 8,
+            native_event_pump: None,
+        });
         assert!(WindowsObserverBridge::is_active());
     }
 
@@ -145,13 +144,12 @@ fn selection_monitor_native_preferred_transitions_subscriber_manager_lifecycle()
     let before = windows_native_subscriber_stats();
 
     {
-        let _monitor =
-            WindowsSelectionMonitor::new_with_options(WindowsSelectionMonitorOptions {
-                poll_interval: Duration::from_millis(10),
-                backend: WindowsMonitorBackend::NativeEventPreferred,
-                native_queue_capacity: 8,
-                native_event_pump: None,
-            });
+        let _monitor = WindowsSelectionMonitor::new_with_options(WindowsSelectionMonitorOptions {
+            poll_interval: Duration::from_millis(10),
+            backend: WindowsMonitorBackend::NativeEventPreferred,
+            native_queue_capacity: 8,
+            native_event_pump: None,
+        });
         let during = windows_native_subscriber_stats();
         assert!(during.active);
         assert_eq!(during.starts, before.starts + 1);
@@ -199,8 +197,7 @@ fn dispatches_primary_accessibility_to_ui_automation() {
         synthetic_copy: PlatformAttemptResult::Unavailable,
     };
 
-    let result =
-        WindowsPlatform::dispatch_attempt(&backend, CaptureMethod::AccessibilityPrimary);
+    let result = WindowsPlatform::dispatch_attempt(&backend, CaptureMethod::AccessibilityPrimary);
 
     assert_eq!(result, PlatformAttemptResult::PermissionDenied);
 }

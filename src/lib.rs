@@ -4,16 +4,14 @@ mod async_api;
 mod ax_observer;
 mod cache;
 mod engine;
-mod native_subscriber;
-mod observer_bridge;
 #[cfg(feature = "linux-alpha")]
 mod linux;
 #[cfg(feature = "linux-alpha")]
 mod linux_observer;
 #[cfg(feature = "linux-alpha")]
-mod linux_shell;
-#[cfg(feature = "linux-alpha")]
 mod linux_runtime_adapter;
+#[cfg(feature = "linux-alpha")]
+mod linux_shell;
 #[cfg(feature = "linux-alpha")]
 mod linux_subscriber;
 #[cfg(target_os = "macos")]
@@ -21,6 +19,8 @@ mod macos;
 #[cfg(target_os = "macos")]
 mod macos_ax;
 mod monitor;
+mod native_subscriber;
+mod observer_bridge;
 pub mod platform;
 mod profile;
 #[cfg(feature = "rich-content")]

@@ -80,12 +80,7 @@ macro_rules! define_observer_bridge {
                         return Self::is_active();
                     }
                     if OBSERVER_CLIENTS
-                        .compare_exchange(
-                            current,
-                            current - 1,
-                            Ordering::SeqCst,
-                            Ordering::SeqCst,
-                        )
+                        .compare_exchange(current, current - 1, Ordering::SeqCst, Ordering::SeqCst)
                         .is_ok()
                     {
                         if current == 1 {

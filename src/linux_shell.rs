@@ -94,9 +94,7 @@ pub(crate) fn clipboard_command_plan(session: LinuxSession) -> &'static [LinuxCo
 }
 
 #[cfg(any(target_os = "linux", test))]
-pub(crate) fn primary_selection_command_plan(
-    session: LinuxSession,
-) -> &'static [LinuxCommandSpec] {
+pub(crate) fn primary_selection_command_plan(session: LinuxSession) -> &'static [LinuxCommandSpec] {
     const WAYLAND_FIRST: [LinuxCommandSpec; 4] = [
         LinuxCommandSpec {
             program: "wl-paste",

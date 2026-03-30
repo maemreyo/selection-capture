@@ -168,8 +168,7 @@ fn selection_monitor_native_queue_batch_enqueue_counts_accepts() {
         active_pid_provider: None,
     });
 
-    let accepted =
-        monitor.enqueue_native_selection_events(vec!["one", "one", " ", "two", "three"]);
+    let accepted = monitor.enqueue_native_selection_events(vec!["one", "one", " ", "two", "three"]);
 
     assert_eq!(accepted, 3);
     assert_eq!(monitor.native_queue_depth(), 3);

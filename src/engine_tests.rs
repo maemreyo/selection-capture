@@ -47,11 +47,7 @@ impl CapturePlatform for StubPlatform {
         self.app.clone()
     }
 
-    fn attempt(
-        &self,
-        _method: CaptureMethod,
-        _app: Option<&ActiveApp>,
-    ) -> PlatformAttemptResult {
+    fn attempt(&self, _method: CaptureMethod, _app: Option<&ActiveApp>) -> PlatformAttemptResult {
         let mut guard = self.responses.lock().unwrap();
         if guard.is_empty() {
             PlatformAttemptResult::Unavailable
@@ -139,10 +135,10 @@ fn capture_trace_records_method_timing_and_total_elapsed() {
                     ..
                 }
             )));
-            assert!(trace.events.iter().any(|event| matches!(
-                event,
-                TraceEvent::CleanupFinished(CleanupStatus::Clean)
-            )));
+            assert!(trace
+                .events
+                .iter()
+                .any(|event| matches!(event, TraceEvent::CleanupFinished(CleanupStatus::Clean))));
             assert!(trace.total_elapsed <= options.overall_timeout);
         }
         other => panic!("expected success, got {other:?}"),
@@ -247,8 +243,7 @@ fn probes_other_methods_before_waiting_for_retry_delay() {
         collect_trace: true,
         ..CaptureOptions::default()
     };
-    options.retry_policy.primary_accessibility =
-        vec![Duration::ZERO, Duration::from_millis(60)];
+    options.retry_policy.primary_accessibility = vec![Duration::ZERO, Duration::from_millis(60)];
     options.retry_policy.range_accessibility = vec![Duration::ZERO];
     options.retry_policy.clipboard = vec![Duration::from_millis(120)];
     options.interleave_method_retries = true;
@@ -301,8 +296,7 @@ fn capture_can_disable_interleaving_and_keep_sequential_retry_order() {
         collect_trace: true,
         ..CaptureOptions::default()
     };
-    options.retry_policy.primary_accessibility =
-        vec![Duration::ZERO, Duration::from_millis(60)];
+    options.retry_policy.primary_accessibility = vec![Duration::ZERO, Duration::from_millis(60)];
     options.retry_policy.range_accessibility = vec![Duration::ZERO];
     options.retry_policy.clipboard = vec![Duration::from_millis(120)];
     options.interleave_method_retries = false;
@@ -381,8 +375,8 @@ fn try_capture_succeeds_immediately_when_primary_method_succeeds() {
     options.retry_policy.range_accessibility = vec![Duration::ZERO];
     options.retry_policy.clipboard = vec![Duration::from_millis(120)];
 
-    let out = try_capture(&platform, &store, &cancel, &[&adapter], &options)
-        .expect("should not block");
+    let out =
+        try_capture(&platform, &store, &cancel, &[&adapter], &options).expect("should not block");
     match out {
         CaptureOutcome::Success(success) => {
             assert_eq!(success.method, CaptureMethod::AccessibilityPrimary);
@@ -417,8 +411,8 @@ fn try_capture_trace_records_method_timing_and_total_elapsed() {
     options.retry_policy.clipboard = vec![Duration::from_millis(120)];
     options.overall_timeout = Duration::from_secs(1);
 
-    let out = try_capture(&platform, &store, &cancel, &[&adapter], &options)
-        .expect("should not block");
+    let out =
+        try_capture(&platform, &store, &cancel, &[&adapter], &options).expect("should not block");
     match out {
         CaptureOutcome::Success(success) => {
             let trace = success.trace.expect("trace");
@@ -429,10 +423,10 @@ fn try_capture_trace_records_method_timing_and_total_elapsed() {
                     ..
                 }
             )));
-            assert!(trace.events.iter().any(|event| matches!(
-                event,
-                TraceEvent::CleanupFinished(CleanupStatus::Clean)
-            )));
+            assert!(trace
+                .events
+                .iter()
+                .any(|event| matches!(event, TraceEvent::CleanupFinished(CleanupStatus::Clean))));
             assert!(trace.total_elapsed <= options.overall_timeout);
         }
         other => panic!("expected success, got {other:?}"),

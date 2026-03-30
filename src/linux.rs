@@ -2,12 +2,12 @@ use crate::linux_observer::{
     drain_events_for_monitor as linux_observer_drain_events_for_monitor, LinuxObserverBridge,
 };
 use crate::linux_runtime_adapter::install_default_linux_runtime_adapter_if_absent;
+#[cfg(target_os = "linux")]
+use crate::linux_shell::LinuxCommandSpec;
 #[cfg(any(target_os = "linux", test))]
 use crate::linux_shell::{
     clipboard_command_plan, detect_linux_session, primary_selection_command_plan, LinuxSession,
 };
-#[cfg(target_os = "linux")]
-use crate::linux_shell::LinuxCommandSpec;
 use crate::linux_subscriber::ensure_linux_native_subscriber_hook_installed;
 #[cfg(all(feature = "rich-content", target_os = "linux"))]
 use crate::rich_convert::plain_text_to_minimal_rtf;
@@ -676,4 +676,3 @@ fn read_process_exe_path(pid: u32) -> Result<Option<String>, String> {
 #[cfg(test)]
 #[path = "linux_tests.rs"]
 mod tests;
-

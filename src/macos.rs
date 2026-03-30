@@ -1,8 +1,10 @@
 #[cfg(target_os = "macos")]
 use crate::ax_observer_drain_events_for_monitor;
-use crate::macos_ax::{get_selected_text_by_ax, ClipboardBorrowResult, run_clipboard_borrow_script};
 #[cfg(feature = "rich-content")]
 pub(crate) use crate::macos_ax::try_selected_rtf_by_ax;
+use crate::macos_ax::{
+    get_selected_text_by_ax, run_clipboard_borrow_script, ClipboardBorrowResult,
+};
 use crate::traits::{CapturePlatform, MonitorPlatform};
 use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
 #[cfg(target_os = "macos")]
@@ -117,12 +119,17 @@ impl MacOSPlatform {
     }
 
     fn reset_cleanup(&self) {
-        *self.cleanup_status.lock().unwrap_or_else(|e| e.into_inner()) = CleanupStatus::Clean;
+        *self
+            .cleanup_status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = CleanupStatus::Clean;
     }
 
     fn mark_cleanup_failed(&self) {
-        *self.cleanup_status.lock().unwrap_or_else(|e| e.into_inner()) =
-            CleanupStatus::ClipboardRestoreFailed;
+        *self
+            .cleanup_status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = CleanupStatus::ClipboardRestoreFailed;
     }
 
     fn active_app_inner(&self) -> Option<ActiveApp> {
@@ -437,7 +444,10 @@ impl CapturePlatform for MacOSPlatform {
     }
 
     fn cleanup(&self) -> CleanupStatus {
-        let mut guard = self.cleanup_status.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self
+            .cleanup_status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let status = *guard;
         *guard = CleanupStatus::Clean;
         status
