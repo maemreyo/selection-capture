@@ -47,17 +47,94 @@ pub(crate) fn plain_text_to_minimal_rtf(text: &str) -> String {
 }
 
 fn rtf_to_markdown(input: &str) -> Option<String> {
-    let primary = normalize_plain_text(&rtf_to_markdown_from_bytes(input.as_bytes())?);
-    if !input.contains(r"\par") || primary.contains('\n') {
+    let sanitized = strip_rtf_non_content_groups(input);
+    let primary = normalize_plain_text(&rtf_to_markdown_from_bytes(sanitized.as_bytes())?);
+    if !sanitized.contains(r"\par") || primary.contains('\n') {
         return Some(primary);
     }
 
-    recover_paragraph_breaks_with_marker(input).or(Some(primary))
+    recover_paragraph_breaks_with_marker(&sanitized).or(Some(primary))
 }
 
 fn rtf_to_markdown_from_bytes(input: &[u8]) -> Option<String> {
     let html = rtf_to_html::rtf_to_html(input).ok()?;
     Some(quick_html2md::html_to_markdown(&html))
+}
+
+fn strip_rtf_non_content_groups(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    let mut depth = 0usize;
+
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            out.push('\\');
+            i += 1;
+            if i < bytes.len() {
+                out.push(bytes[i] as char);
+                i += 1;
+            }
+            continue;
+        }
+
+        if bytes[i] == b'{' {
+            let group_depth = depth + 1;
+            if group_depth == 2
+                && (input[i..].starts_with(r"{\info") || input[i..].starts_with(r"{\*\generator"))
+            {
+                if let Some(end) = find_rtf_group_end(bytes, i) {
+                    i = end;
+                    continue;
+                }
+            }
+
+            depth += 1;
+            out.push('{');
+            i += 1;
+            continue;
+        }
+
+        if bytes[i] == b'}' {
+            depth = depth.saturating_sub(1);
+            out.push('}');
+            i += 1;
+            continue;
+        }
+
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+
+    out
+}
+
+fn find_rtf_group_end(bytes: &[u8], start: usize) -> Option<usize> {
+    if bytes.get(start) != Some(&b'{') {
+        return None;
+    }
+
+    let mut depth = 0usize;
+    let mut i = start;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i = i.saturating_add(2);
+            continue;
+        }
+
+        if bytes[i] == b'{' {
+            depth += 1;
+        } else if bytes[i] == b'}' {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                return Some(i + 1);
+            }
+        }
+
+        i += 1;
+    }
+
+    None
 }
 
 fn recover_paragraph_breaks_with_marker(input: &str) -> Option<String> {
@@ -226,6 +303,44 @@ mod tests {
         let markdown = convert_to_markdown(Some("<p>HTML wins</p>"), Some(rtf), "")
             .expect("html should win when non-empty");
         assert_eq!(markdown, "HTML wins");
+    }
+
+    #[test]
+    fn converts_messy_controls_fixture_with_stable_line_structure() {
+        let rtf = include_str!("../tests/fixtures/rich/messy-controls-unicode.rtf");
+        let markdown =
+            convert_to_markdown(None, Some(rtf), "").expect("messy fixture should convert");
+        let lines: Vec<&str> = markdown.lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0], "Release notes:");
+        assert!(lines[1].contains("Item 1:"));
+        assert!(lines[1].contains("Align observer locks"));
+        assert!(lines[2].contains("Item 2:"));
+        assert!(lines[2].contains("Harden RTF fallback"));
+        assert_eq!(lines[3], "Postscript:parser should keep this line.");
+    }
+
+    #[test]
+    fn converts_messy_field_fixture_with_escaped_literals_and_link_text() {
+        let rtf = include_str!("../tests/fixtures/rich/messy-field-escaped.rtf");
+        let markdown =
+            convert_to_markdown(None, Some(rtf), "").expect("messy field fixture should convert");
+        let lines: Vec<&str> = markdown.lines().collect();
+        assert_eq!(lines[0], "Meeting notes:");
+        assert_eq!(lines[1], "- Verify fallback ordering");
+        assert!(lines[2].contains("literal braces"));
+        assert!(lines[2].contains("backslashes"));
+        assert_eq!(lines[3], "docs portal");
+        assert_eq!(lines[4], "End of note.");
+    }
+
+    #[test]
+    fn strips_info_and_generator_groups_before_conversion() {
+        let rtf = include_str!("../tests/fixtures/rich/messy-field-escaped.rtf");
+        let sanitized = strip_rtf_non_content_groups(rtf);
+        assert!(!sanitized.contains(r"{\info"));
+        assert!(!sanitized.contains(r"{\*\generator"));
+        assert!(sanitized.contains("Meeting notes:"));
     }
 
     #[test]

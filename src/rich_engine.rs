@@ -424,6 +424,14 @@ mod tests {
         include_str!("../tests/fixtures/rich/outlook-style-bullets.rtf")
     }
 
+    fn fixture_messy_controls_rtf() -> &'static str {
+        include_str!("../tests/fixtures/rich/messy-controls-unicode.rtf")
+    }
+
+    fn fixture_messy_field_rtf() -> &'static str {
+        include_str!("../tests/fixtures/rich/messy-field-escaped.rtf")
+    }
+
     fn fixture_word_markdown() -> &'static str {
         "Hello,\nThis is a Word exported paragraph.\nRegards,\nTeam"
     }
@@ -841,6 +849,113 @@ mod tests {
                 CapturedContent::Rich(payload) => {
                     assert_eq!(payload.metadata.source, RichSource::ClipboardRtf);
                     assert_eq!(payload.markdown.as_deref(), Some(fixture_word_markdown()));
+                }
+                CapturedContent::Plain(_) => panic!("expected rich content"),
+            },
+            CaptureRichOutcome::Failure(_) => panic!("expected success"),
+        }
+    }
+
+    #[test]
+    fn populates_markdown_from_messy_controls_fixture() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.rich".to_string(),
+                name: "Rich App".to_string(),
+            }),
+            responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                "placeholder plain text".to_string(),
+            )])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let reader = StubReader {
+            payload: Some(RichClipboardPayload {
+                plain_text: Some("mismatched plain text is allowed".to_string()),
+                html: None,
+                rtf: Some(fixture_messy_controls_rtf().to_string()),
+            }),
+        };
+        let mut options = rich_options();
+        options.require_plain_text_match = false;
+        options.conversion = Some(RichConversion::Markdown);
+
+        let out = capture_rich_with_reader(
+            &platform,
+            &StubStore,
+            &NeverCancel,
+            &[&NoAdapters],
+            &options,
+            &reader,
+        );
+
+        match out {
+            CaptureRichOutcome::Success(success) => match success.content {
+                CapturedContent::Rich(payload) => {
+                    let markdown = payload
+                        .markdown
+                        .expect("markdown should be populated for messy controls fixture");
+                    let lines: Vec<&str> = markdown.lines().collect();
+                    assert_eq!(payload.metadata.source, RichSource::ClipboardRtf);
+                    assert_eq!(lines.len(), 4);
+                    assert_eq!(lines[0], "Release notes:");
+                    assert!(lines[1].contains("Item 1:"));
+                    assert!(lines[1].contains("Align observer locks"));
+                    assert!(lines[2].contains("Item 2:"));
+                    assert!(lines[2].contains("Harden RTF fallback"));
+                    assert_eq!(lines[3], "Postscript:parser should keep this line.");
+                }
+                CapturedContent::Plain(_) => panic!("expected rich content"),
+            },
+            CaptureRichOutcome::Failure(_) => panic!("expected success"),
+        }
+    }
+
+    #[test]
+    fn populates_markdown_from_messy_field_fixture() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.rich".to_string(),
+                name: "Rich App".to_string(),
+            }),
+            responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                "placeholder plain text".to_string(),
+            )])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let reader = StubReader {
+            payload: Some(RichClipboardPayload {
+                plain_text: Some("mismatched plain text is allowed".to_string()),
+                html: None,
+                rtf: Some(fixture_messy_field_rtf().to_string()),
+            }),
+        };
+        let mut options = rich_options();
+        options.require_plain_text_match = false;
+        options.conversion = Some(RichConversion::Markdown);
+
+        let out = capture_rich_with_reader(
+            &platform,
+            &StubStore,
+            &NeverCancel,
+            &[&NoAdapters],
+            &options,
+            &reader,
+        );
+
+        match out {
+            CaptureRichOutcome::Success(success) => match success.content {
+                CapturedContent::Rich(payload) => {
+                    let markdown = payload
+                        .markdown
+                        .expect("markdown should be populated for messy field fixture");
+                    let lines: Vec<&str> = markdown.lines().collect();
+                    assert_eq!(payload.metadata.source, RichSource::ClipboardRtf);
+                    assert_eq!(lines[0], "Meeting notes:");
+                    assert_eq!(lines[1], "- Verify fallback ordering");
+                    assert!(lines[2].contains("literal braces"));
+                    assert!(lines[2].contains("backslashes"));
+                    assert_eq!(lines[3], "docs portal");
+                    assert_eq!(lines[4], "End of note.");
                 }
                 CapturedContent::Plain(_) => panic!("expected rich content"),
             },
