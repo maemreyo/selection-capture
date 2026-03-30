@@ -176,6 +176,28 @@ mod tests {
     }
 
     #[test]
+    fn converts_word_style_rtf_fixture_to_multiline_text() {
+        let input = include_str!("../tests/fixtures/rich/word-style-paragraphs.rtf");
+        let markdown =
+            convert_to_markdown(None, Some(input), "").expect("markdown should be present");
+        assert_eq!(
+            markdown,
+            "Hello,\nThis is a Word exported paragraph.\nRegards,\nTeam"
+        );
+    }
+
+    #[test]
+    fn converts_outlook_style_rtf_fixture_to_multiline_text() {
+        let input = include_str!("../tests/fixtures/rich/outlook-style-bullets.rtf");
+        let markdown =
+            convert_to_markdown(None, Some(input), "").expect("markdown should be present");
+        assert_eq!(
+            markdown,
+            "Weekly update:\n- Ship crate-backed rich conversion\n- Keep observer tests deterministic\nThanks,\nSelection Capture Team"
+        );
+    }
+
+    #[test]
     fn wraps_plain_text_as_minimal_rtf() {
         let rtf = plain_text_to_minimal_rtf("a{b}\\c\nd");
         assert!(rtf.starts_with("{\\rtf1\\ansi "));
