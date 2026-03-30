@@ -5,11 +5,17 @@ use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResul
 #[cfg(target_os = "macos")]
 use crate::AxObserverBridge;
 use accessibility_ng::{AXAttribute, AXObserver, AXUIElement};
+#[cfg(feature = "rich-content")]
+use accessibility_sys_ng::kAXRTFForRangeParameterizedAttribute;
 use accessibility_sys_ng::{
     kAXFocusedUIElementAttribute, kAXFocusedUIElementChangedNotification, kAXSelectedTextAttribute,
     kAXSelectedTextChangedNotification, pid_t, AXObserverRef, AXUIElementRef,
 };
 use active_win_pos_rs::get_active_window;
+#[cfg(feature = "rich-content")]
+use core_foundation::base::CFType;
+#[cfg(feature = "rich-content")]
+use core_foundation::data::CFData;
 use core_foundation::runloop::{kCFRunLoopDefaultMode, CFRunLoop};
 use core_foundation::string::CFString;
 use macos_accessibility_client::accessibility::application_is_trusted;
@@ -605,6 +611,53 @@ fn get_selected_text_by_ax() -> Result<String, String> {
     };
 
     Ok(selected_text.to_string())
+}
+
+#[cfg(feature = "rich-content")]
+pub(crate) fn try_selected_rtf_by_ax() -> Option<String> {
+    if !application_is_trusted() {
+        return None;
+    }
+    get_selected_rtf_by_ax()
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
+
+#[cfg(feature = "rich-content")]
+fn get_selected_rtf_by_ax() -> Result<String, String> {
+    let system_element = AXUIElement::system_wide();
+    let Some(selected_element) = system_element
+        .attribute(&AXAttribute::new(&CFString::from_static_string(
+            kAXFocusedUIElementAttribute,
+        )))
+        .map(|element| element.downcast_into::<AXUIElement>())
+        .ok()
+        .flatten()
+    else {
+        return Err("No focused UI element".to_string());
+    };
+
+    let selected_range = selected_element
+        .attribute(&AXAttribute::selected_text_range())
+        .map_err(|_| "No selected text range".to_string())?;
+    let range = selected_range
+        .get_value::<core_foundation::base::CFRange>()
+        .map_err(|_| "Invalid selected text range".to_string())?;
+    if range.length <= 0 {
+        return Err("No selected text range".to_string());
+    }
+
+    let attr = AXAttribute::<CFType>::new(&CFString::from_static_string(
+        kAXRTFForRangeParameterizedAttribute,
+    ));
+    let rtf_data = selected_element
+        .parameterized_attribute(&attr, &selected_range)
+        .map(|value| value.downcast_into::<CFData>())
+        .ok()
+        .flatten()
+        .ok_or_else(|| "No RTF for selected range".to_string())?;
+
+    Ok(String::from_utf8_lossy(rtf_data.bytes()).into_owned())
 }
 
 #[derive(Debug, PartialEq, Eq)]

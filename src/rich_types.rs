@@ -54,6 +54,7 @@ pub struct CaptureRichOptions {
     pub base: CaptureOptions,
     pub prefer_rich: bool,
     pub allow_clipboard_rich: bool,
+    pub allow_direct_accessibility_rich: bool,
     pub max_rich_payload_bytes: usize,
     pub require_plain_text_match: bool,
 }
@@ -64,6 +65,7 @@ impl Default for CaptureRichOptions {
             base: CaptureOptions::default(),
             prefer_rich: true,
             allow_clipboard_rich: true,
+            allow_direct_accessibility_rich: true,
             max_rich_payload_bytes: 256 * 1024,
             require_plain_text_match: true,
         }

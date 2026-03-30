@@ -2,7 +2,7 @@
 
 **Goal:** Add rich-content capture (RTF/HTML + metadata) without breaking the existing plain-text API.
 
-**Architecture:** Keep `capture()` unchanged and introduce additive rich APIs/types. Implement clipboard-first rich extraction with strict consistency guards, then layer direct platform accessibility extraction later. Reuse the current engine as plain-text baseline and compose rich extraction around it.
+**Architecture:** Keep `capture()` unchanged and introduce additive rich APIs/types. Implement rich extraction as additive orchestration around the plain engine: direct accessibility rich path on macOS first, then clipboard rich extraction with strict consistency guards.
 
 **Tech Stack:** Rust, existing `selection-capture` core engine, optional `clipboard-rs` (feature-gated), existing trace/monitoring types.
 
@@ -28,14 +28,16 @@ Reference input: `docs/plans/rich-content-research-verdict.md`.
 
 ## 2.1 In Scope (Phase 3.3 initial delivery)
 - Add new rich-capture API surface (additive only).
-- Clipboard-first rich extraction (RTF/HTML when available).
+- Rich extraction pipeline:
+  - macOS direct selected-range RTF when available.
+  - Clipboard HTML/RTF fallback.
 - Metadata envelope for capture context.
 - Consistency guard to avoid returning stale clipboard rich payloads.
 - Test coverage for fallback chain and consistency behavior.
 - Documentation for new API and behavior contract.
 
 ## 2.2 Out of Scope (defer)
-- In-process direct attributed-text extraction from macOS/Windows/Linux accessibility APIs.
+- In-process direct attributed-text extraction from Windows/Linux accessibility APIs.
 - Syntax highlighting and semantic code tokenization.
 - Persistent storage/indexing of captured rich payloads.
 - Plugin system and custom converters.
@@ -111,6 +113,7 @@ pub struct CaptureRichOptions {
     pub base: CaptureOptions,
     pub prefer_rich: bool,              // default: true
     pub allow_clipboard_rich: bool,     // default: true
+    pub allow_direct_accessibility_rich: bool, // default: true (macOS only)
     pub max_rich_payload_bytes: usize,  // default: 262_144 (256 KiB)
     pub require_plain_text_match: bool, // default: true
 }
@@ -144,16 +147,17 @@ where
 
 ## 5. Functional Behavior
 
-## 5.1 Primary Flow (Clipboard-first rich)
+## 5.1 Primary Flow (Direct-first on macOS, then clipboard)
 1. Run existing plain-text engine (`capture` / `try_capture`) to obtain baseline plain text + method.
 2. If plain result is `Failure`, return `Failure` unchanged.
 3. If rich is disabled by options, return `CapturedContent::Plain`.
-4. Attempt clipboard rich read (`HTML`, then `RTF`) if enabled.
-5. Validate consistency:
+4. On macOS, if enabled and method is accessibility-based, attempt direct selected-range RTF extraction.
+5. If no direct rich payload is available, attempt clipboard rich read (`HTML`, then `RTF`) if enabled.
+6. Validate clipboard consistency:
    - Clipboard plain text must equal captured plain text (normalized compare), OR
    - hash match if exact compare disabled in future.
-6. If valid rich format found, return `CapturedContent::Rich`.
-7. Else return `CapturedContent::Plain`.
+7. If valid rich format found, return `CapturedContent::Rich`.
+8. Else return `CapturedContent::Plain`.
 
 ## 5.2 Consistency Guard (Required)
 
@@ -225,7 +229,6 @@ Normalization for comparison (v1):
   - `cargo test --features linux-alpha --lib --verbose`
 
 ## 8.3 Non-Goals in Tests (defer)
-- No direct AX attributed-string test coverage in this phase.
 - No benchmark gate yet (can be added later).
 
 ---

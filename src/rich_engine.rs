@@ -1,4 +1,6 @@
 use crate::engine::{capture, try_capture};
+#[cfg(target_os = "macos")]
+use crate::macos::try_selected_rtf_by_ax;
 use crate::rich_clipboard::{RichClipboardPayload, RichClipboardReader, SystemRichClipboardReader};
 use crate::rich_types::{
     CaptureRichOptions, CaptureRichOutcome, CaptureRichSuccess, CapturedContent, ContentMetadata,
@@ -40,8 +42,28 @@ fn capture_rich_with_reader(
     options: &CaptureRichOptions,
     reader: &impl RichClipboardReader,
 ) -> CaptureRichOutcome {
+    capture_rich_with_reader_and_direct_reader(
+        platform,
+        store,
+        cancel,
+        adapters,
+        options,
+        reader,
+        &read_direct_rtf_for_current_selection,
+    )
+}
+
+fn capture_rich_with_reader_and_direct_reader(
+    platform: &impl CapturePlatform,
+    store: &impl AppProfileStore,
+    cancel: &impl CancelSignal,
+    adapters: &[&dyn AppAdapter],
+    options: &CaptureRichOptions,
+    reader: &impl RichClipboardReader,
+    direct_rtf_reader: &impl Fn() -> Option<String>,
+) -> CaptureRichOutcome {
     let outcome = capture(platform, store, cancel, adapters, &options.base);
-    enrich_capture_outcome(platform, outcome, options, reader)
+    enrich_capture_outcome(platform, outcome, options, reader, direct_rtf_reader)
 }
 
 fn try_capture_rich_with_reader(
@@ -52,8 +74,34 @@ fn try_capture_rich_with_reader(
     options: &CaptureRichOptions,
     reader: &impl RichClipboardReader,
 ) -> Result<CaptureRichOutcome, WouldBlock> {
+    try_capture_rich_with_reader_and_direct_reader(
+        platform,
+        store,
+        cancel,
+        adapters,
+        options,
+        reader,
+        &read_direct_rtf_for_current_selection,
+    )
+}
+
+fn try_capture_rich_with_reader_and_direct_reader(
+    platform: &impl CapturePlatform,
+    store: &impl AppProfileStore,
+    cancel: &impl CancelSignal,
+    adapters: &[&dyn AppAdapter],
+    options: &CaptureRichOptions,
+    reader: &impl RichClipboardReader,
+    direct_rtf_reader: &impl Fn() -> Option<String>,
+) -> Result<CaptureRichOutcome, WouldBlock> {
     let outcome = try_capture(platform, store, cancel, adapters, &options.base)?;
-    Ok(enrich_capture_outcome(platform, outcome, options, reader))
+    Ok(enrich_capture_outcome(
+        platform,
+        outcome,
+        options,
+        reader,
+        direct_rtf_reader,
+    ))
 }
 
 fn enrich_capture_outcome(
@@ -61,11 +109,39 @@ fn enrich_capture_outcome(
     outcome: CaptureOutcome,
     options: &CaptureRichOptions,
     reader: &impl RichClipboardReader,
+    direct_rtf_reader: &impl Fn() -> Option<String>,
 ) -> CaptureRichOutcome {
     match outcome {
         CaptureOutcome::Failure(failure) => CaptureRichOutcome::Failure(failure),
         CaptureOutcome::Success(success) => {
             let plain_text = success.text;
+
+            #[cfg(target_os = "macos")]
+            if options.allow_direct_accessibility_rich && success.method.is_ax() {
+                if let Some(rtf) = direct_rtf_reader() {
+                    if rtf.len() <= options.max_rich_payload_bytes {
+                        let metadata = ContentMetadata {
+                            active_app: detect_active_app(success.trace.as_ref())
+                                .or_else(|| platform.active_app()),
+                            method: success.method,
+                            source: RichSource::AccessibilityAttributed,
+                            captured_at_unix_ms: unix_epoch_millis(),
+                            plain_text_hash: hash_text(&plain_text),
+                        };
+
+                        return CaptureRichOutcome::Success(CaptureRichSuccess {
+                            content: CapturedContent::Rich(RichPayload {
+                                plain_text: plain_text.clone(),
+                                html: None,
+                                rtf: Some(rtf),
+                                metadata,
+                            }),
+                            method: success.method,
+                            trace: success.trace,
+                        });
+                    }
+                }
+            }
 
             if !options.prefer_rich || !options.allow_clipboard_rich {
                 return CaptureRichOutcome::Success(CaptureRichSuccess {
@@ -135,6 +211,17 @@ fn enrich_capture_outcome(
                 trace: success.trace,
             })
         }
+    }
+}
+
+fn read_direct_rtf_for_current_selection() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        try_selected_rtf_by_ax()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
     }
 }
 
@@ -281,6 +368,7 @@ mod tests {
     fn rich_options() -> CaptureRichOptions {
         CaptureRichOptions {
             base: base_options(),
+            allow_direct_accessibility_rich: false,
             ..CaptureRichOptions::default()
         }
     }
@@ -481,6 +569,143 @@ mod tests {
             CaptureRichOutcome::Success(success) => match success.content {
                 CapturedContent::Plain(text) => assert_eq!(text, "hello"),
                 CapturedContent::Rich(_) => panic!("expected plain content"),
+            },
+            CaptureRichOutcome::Failure(_) => panic!("expected success"),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn prefers_direct_ax_rtf_before_clipboard_payload() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.rich".to_string(),
+                name: "Rich App".to_string(),
+            }),
+            responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                "hello".to_string(),
+            )])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let reader = StubReader {
+            payload: Some(RichClipboardPayload {
+                plain_text: Some("hello".to_string()),
+                html: Some("<p>hello from clipboard</p>".to_string()),
+                rtf: None,
+            }),
+        };
+        let mut options = rich_options();
+        options.allow_direct_accessibility_rich = true;
+
+        let out = capture_rich_with_reader_and_direct_reader(
+            &platform,
+            &StubStore,
+            &NeverCancel,
+            &[&NoAdapters],
+            &options,
+            &reader,
+            &|| Some("{\\rtf1 hello from direct}".to_string()),
+        );
+
+        match out {
+            CaptureRichOutcome::Success(success) => match success.content {
+                CapturedContent::Rich(payload) => {
+                    assert_eq!(payload.rtf.as_deref(), Some("{\\rtf1 hello from direct}"));
+                    assert_eq!(payload.html, None);
+                    assert_eq!(payload.metadata.source, RichSource::AccessibilityAttributed);
+                }
+                CapturedContent::Plain(_) => panic!("expected rich content"),
+            },
+            CaptureRichOutcome::Failure(_) => panic!("expected success"),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn falls_back_to_clipboard_when_direct_ax_rtf_is_unavailable() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.rich".to_string(),
+                name: "Rich App".to_string(),
+            }),
+            responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                "hello".to_string(),
+            )])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let reader = StubReader {
+            payload: Some(RichClipboardPayload {
+                plain_text: Some("hello".to_string()),
+                html: Some("<p>hello from clipboard</p>".to_string()),
+                rtf: None,
+            }),
+        };
+        let mut options = rich_options();
+        options.allow_direct_accessibility_rich = true;
+
+        let out = capture_rich_with_reader_and_direct_reader(
+            &platform,
+            &StubStore,
+            &NeverCancel,
+            &[&NoAdapters],
+            &options,
+            &reader,
+            &|| None,
+        );
+
+        match out {
+            CaptureRichOutcome::Success(success) => match success.content {
+                CapturedContent::Rich(payload) => {
+                    assert_eq!(payload.html.as_deref(), Some("<p>hello from clipboard</p>"));
+                    assert_eq!(payload.metadata.source, RichSource::ClipboardHtml);
+                }
+                CapturedContent::Plain(_) => panic!("expected rich content"),
+            },
+            CaptureRichOutcome::Failure(_) => panic!("expected success"),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn falls_back_to_clipboard_when_direct_ax_rtf_exceeds_limit() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.rich".to_string(),
+                name: "Rich App".to_string(),
+            }),
+            responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                "hello".to_string(),
+            )])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let reader = StubReader {
+            payload: Some(RichClipboardPayload {
+                plain_text: Some("hello".to_string()),
+                html: Some("<p>hello from clipboard</p>".to_string()),
+                rtf: None,
+            }),
+        };
+        let mut options = rich_options();
+        options.allow_direct_accessibility_rich = true;
+        options.max_rich_payload_bytes = 32;
+
+        let out = capture_rich_with_reader_and_direct_reader(
+            &platform,
+            &StubStore,
+            &NeverCancel,
+            &[&NoAdapters],
+            &options,
+            &reader,
+            &|| Some("{\\rtf1 this payload is definitely too long}".to_string()),
+        );
+
+        match out {
+            CaptureRichOutcome::Success(success) => match success.content {
+                CapturedContent::Rich(payload) => {
+                    assert_eq!(payload.html.as_deref(), Some("<p>hello from clipboard</p>"));
+                    assert_eq!(payload.metadata.source, RichSource::ClipboardHtml);
+                }
+                CapturedContent::Plain(_) => panic!("expected rich content"),
             },
             CaptureRichOutcome::Failure(_) => panic!("expected success"),
         }

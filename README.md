@@ -220,9 +220,14 @@ Current limitations:
 `capture_rich(...)` preserves backward compatibility by keeping the plain capture engine as baseline,
 then optionally attaching clipboard rich payloads.
 
-- Rich payload sources (current): clipboard HTML/RTF
+- Rich payload sources (current):
+  - macOS direct AX RTF (`AXRTFForRange`) when capture method is accessibility-based
+  - Clipboard HTML/RTF fallback
 - Guardrail: rich payload is accepted only when clipboard plain text matches captured plain text
 - Fallback: if guard fails (or payload unavailable/oversized), result degrades to plain content
+
+`CaptureRichOptions::allow_direct_accessibility_rich` controls the direct AX path and defaults to
+`true` (macOS only).
 
 ```rust
 #[cfg(feature = "rich-content")]
