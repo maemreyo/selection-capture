@@ -231,7 +231,7 @@ then optionally attaching clipboard rich payloads.
 `CaptureRichOptions::allow_direct_accessibility_rich` controls the direct AX path and defaults to
 `true`.
 `CaptureRichOptions::conversion = Some(RichConversion::Markdown)` enables markdown normalization and
-populates `RichPayload.markdown`.
+populates `RichPayload.markdown` (powered by `quick_html2md` and `rtf-to-html`).
 
 ```rust
 #[cfg(feature = "rich-content")]

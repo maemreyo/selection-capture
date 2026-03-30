@@ -203,6 +203,7 @@ Normalization for comparison (v1):
 ## 6.3 Integration Strategy
 - `rich_engine` calls existing `engine::capture` / `engine::try_capture` as baseline.
 - `rich_clipboard` provides a small adapter trait to isolate `clipboard-rs` and allow deterministic tests.
+- `rich_convert` uses crate-backed conversion (`quick_html2md`, `rtf-to-html`) instead of custom parsers.
 - All rich logic remains additive and does not modify existing `PlatformAttemptResult`.
 
 ---
