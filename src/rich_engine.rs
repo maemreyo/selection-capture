@@ -112,7 +112,7 @@ fn enrich_capture_outcome(
     outcome: CaptureOutcome,
     options: &CaptureRichOptions,
     reader: &impl RichClipboardReader,
-    direct_rtf_reader: &impl Fn() -> Option<String>,
+    _direct_rtf_reader: &impl Fn() -> Option<String>,
 ) -> CaptureRichOutcome {
     match outcome {
         CaptureOutcome::Failure(failure) => CaptureRichOutcome::Failure(failure),
@@ -121,7 +121,7 @@ fn enrich_capture_outcome(
 
             #[cfg(target_os = "macos")]
             if options.allow_direct_accessibility_rich && success.method.is_ax() {
-                if let Some(rtf) = direct_rtf_reader() {
+                if let Some(rtf) = _direct_rtf_reader() {
                     if rtf.len() <= options.max_rich_payload_bytes {
                         let markdown = maybe_convert_to_markdown(
                             options,

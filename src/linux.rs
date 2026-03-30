@@ -4,9 +4,11 @@ use crate::linux_observer::{
 use crate::linux_runtime_adapter::install_default_linux_runtime_adapter_if_absent;
 #[cfg(target_os = "linux")]
 use crate::linux_shell::LinuxCommandSpec;
+#[cfg(test)]
+use crate::linux_shell::LinuxSession;
 #[cfg(any(target_os = "linux", test))]
 use crate::linux_shell::{
-    clipboard_command_plan, detect_linux_session, primary_selection_command_plan, LinuxSession,
+    clipboard_command_plan, detect_linux_session, primary_selection_command_plan,
 };
 use crate::linux_subscriber::ensure_linux_native_subscriber_hook_installed;
 #[cfg(all(feature = "rich-content", target_os = "linux"))]
@@ -337,7 +339,7 @@ impl CapturePlatform for LinuxPlatform {
     fn active_app(&self) -> Option<ActiveApp> {
         #[cfg(target_os = "linux")]
         {
-            return read_active_app().ok().flatten();
+            read_active_app().ok().flatten()
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -580,7 +582,7 @@ except Exception as err:
 pub(crate) fn linux_default_runtime_event_source() -> Option<String> {
     #[cfg(target_os = "linux")]
     {
-        return read_atspi_text().ok().flatten();
+        read_atspi_text().ok().flatten()
     }
     #[cfg(not(target_os = "linux"))]
     {
