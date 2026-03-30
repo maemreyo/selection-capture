@@ -1,0 +1,9 @@
+# llms.txt
+project: selection-capture
+version: 0.1.3
+repo: https://github.com/maemreyo/selection-capture
+docs: https://docs.rs/selection-capture
+crate: https://crates.io/crates/selection-capture
+agent_guide: https://raw.githubusercontent.com/maemreyo/selection-capture/main/AGENTS.md
+features: default(empty), async, linux-alpha, rich-content, windows-beta
+verify: cargo fmt --all -- --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test --verbose

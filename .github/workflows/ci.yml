@@ -32,6 +32,8 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Check agent docs sync
+        run: python3 scripts/check_agent_docs_sync.py
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 

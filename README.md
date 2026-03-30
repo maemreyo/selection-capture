@@ -8,6 +8,9 @@
 `selection-capture` is a Rust library for selected-text capture with retry, cancellation,
 and strategy fallbacks.
 
+For AI agents, use the machine-oriented guide: [`AGENTS.md`](AGENTS.md)  
+Raw URL: `https://raw.githubusercontent.com/maemreyo/selection-capture/main/AGENTS.md`
+
 It is designed as a replacement foundation for earlier `get-selected-text` style usage,
 with explicit capture status and trace metadata for app-level UX decisions.
 

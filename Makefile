@@ -1,6 +1,6 @@
 # Makefile for selection-capture
 
-.PHONY: help build test check fmt clippy clean docs run-examples release install-tools setup-release windows-beta-smoke linux-alpha-smoke bench-regression
+.PHONY: help build test check fmt clippy clean docs run-examples release install-tools setup-release windows-beta-smoke linux-alpha-smoke bench-regression agent-docs agent-docs-check
 
 # Default target
 .DEFAULT_GOAL := help
@@ -42,6 +42,12 @@ docs: ## Build documentation
 
 docs-check: ## Check documentation
 	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items
+
+agent-docs: ## Generate AI-agent docs from Cargo metadata
+	python3 scripts/generate_agent_docs.py
+
+agent-docs-check: ## Ensure AGENTS.md and llms.txt are in sync
+	python3 scripts/check_agent_docs_sync.py
 
 audit: ## Run security audit
 	cargo install cargo-audit
@@ -110,4 +116,4 @@ coverage: ## Generate code coverage report
 	cargo install cargo-tarpaulin
 	cargo tarpaulin --out Html
 
-ci: fmt-check clippy test ## Run CI checks locally
+ci: fmt-check clippy agent-docs-check test ## Run CI checks locally
