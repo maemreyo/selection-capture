@@ -432,8 +432,130 @@ mod tests {
         include_str!("../tests/fixtures/rich/messy-field-escaped.rtf")
     }
 
+    fn fixture_slack_rtf() -> &'static str {
+        include_str!("../tests/fixtures/rich/real/slack-thread-export.rtf")
+    }
+
+    fn fixture_notion_rtf() -> &'static str {
+        include_str!("../tests/fixtures/rich/real/notion-checklist-export.rtf")
+    }
+
+    fn fixture_teams_rtf() -> &'static str {
+        include_str!("../tests/fixtures/rich/real/teams-chat-export.rtf")
+    }
+
     fn fixture_word_markdown() -> &'static str {
         "Hello,\nThis is a Word exported paragraph.\nRegards,\nTeam"
+    }
+
+    #[derive(Clone, Copy)]
+    struct ReplayCase {
+        name: &'static str,
+        rtf: &'static str,
+        required_terms: &'static [&'static str],
+        expect_markdown_from_plain: bool,
+    }
+
+    fn assert_contains_all(haystack: &str, needles: &[&str], case_name: &str) {
+        for needle in needles {
+            assert!(
+                haystack.contains(needle),
+                "case `{case_name}` expected markdown to contain `{needle}`, got:\n{haystack}"
+            );
+        }
+    }
+
+    fn with_line_ending_variant(input: &str, variant_idx: usize) -> String {
+        match variant_idx % 3 {
+            0 => input.to_string(),
+            1 => input.replace('\n', "\r\n"),
+            _ => input.replace('\n', "\r"),
+        }
+    }
+
+    fn replay_cases() -> [ReplayCase; 8] {
+        const MALFORMED_RTF: &str = r"{\rtf1\ansi Broken {payload";
+        [
+            ReplayCase {
+                name: "word",
+                rtf: fixture_word_rtf(),
+                required_terms: &["Hello,", "Word exported paragraph.", "Regards,", "Team"],
+                expect_markdown_from_plain: false,
+            },
+            ReplayCase {
+                name: "outlook",
+                rtf: fixture_outlook_rtf(),
+                required_terms: &[
+                    "Weekly update:",
+                    "Ship crate-backed rich conversion",
+                    "observer tests deterministic",
+                    "Selection Capture Team",
+                ],
+                expect_markdown_from_plain: false,
+            },
+            ReplayCase {
+                name: "messy-controls",
+                rtf: fixture_messy_controls_rtf(),
+                required_terms: &[
+                    "Release notes:",
+                    "Align observer locks",
+                    "Harden RTF fallback",
+                    "Postscript:parser should keep this line.",
+                ],
+                expect_markdown_from_plain: false,
+            },
+            ReplayCase {
+                name: "messy-field",
+                rtf: fixture_messy_field_rtf(),
+                required_terms: &[
+                    "Meeting notes:",
+                    "Verify fallback ordering",
+                    "literal braces",
+                    "docs portal",
+                ],
+                expect_markdown_from_plain: false,
+            },
+            ReplayCase {
+                name: "slack",
+                rtf: fixture_slack_rtf(),
+                required_terms: &[
+                    "Slack digest:",
+                    "Deploy succeeded",
+                    "Follow-up in thread",
+                    "open thread",
+                ],
+                expect_markdown_from_plain: false,
+            },
+            ReplayCase {
+                name: "notion",
+                rtf: fixture_notion_rtf(),
+                required_terms: &[
+                    "Notion page: Sprint Checklist",
+                    "Stabilize conversion on CRLF",
+                    "Add replay corpus for real payloads",
+                    "Preserve escaped braces {ok}",
+                    "Quality over luck.",
+                ],
+                expect_markdown_from_plain: false,
+            },
+            ReplayCase {
+                name: "teams",
+                rtf: fixture_teams_rtf(),
+                required_terms: &[
+                    "Teams chat recap:",
+                    "windows-beta and linux-alpha",
+                    "CI gate: make ci",
+                    r"Escaped path: C:\repo\selection-capture\tests",
+                ],
+                expect_markdown_from_plain: false,
+            },
+            ReplayCase {
+                name: "malformed",
+                rtf: MALFORMED_RTF,
+                required_terms: &[],
+                expect_markdown_from_plain: true,
+            },
+        ]
     }
 
     #[test]
@@ -1199,5 +1321,150 @@ mod tests {
         );
 
         assert_eq!(out, Err(WouldBlock));
+    }
+
+    #[test]
+    fn replays_real_fixture_corpus_with_plain_text_match_enabled() {
+        let cases = replay_cases();
+
+        for case in cases {
+            if case.expect_markdown_from_plain {
+                continue;
+            }
+
+            let mut options = rich_options();
+            options.conversion = Some(RichConversion::Markdown);
+            options.require_plain_text_match = true;
+
+            let expected_markdown = maybe_convert_to_markdown(&options, None, Some(case.rtf), "")
+                .expect("fixture should convert to markdown");
+            assert_contains_all(&expected_markdown, case.required_terms, case.name);
+
+            let platform = StubPlatform {
+                app: Some(ActiveApp {
+                    bundle_id: "app.rich".to_string(),
+                    name: "Rich App".to_string(),
+                }),
+                responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                    expected_markdown.clone(),
+                )])),
+                cleanup: CleanupStatus::Clean,
+            };
+            let reader = StubReader {
+                payload: Some(RichClipboardPayload {
+                    plain_text: Some(expected_markdown.replace('\n', "\r\n") + "\r\n"),
+                    html: None,
+                    rtf: Some(case.rtf.to_string()),
+                }),
+            };
+
+            let out = capture_rich_with_reader(
+                &platform,
+                &StubStore,
+                &NeverCancel,
+                &[&NoAdapters],
+                &options,
+                &reader,
+            );
+
+            match out {
+                CaptureRichOutcome::Success(success) => match success.content {
+                    CapturedContent::Rich(payload) => {
+                        let markdown = payload
+                            .markdown
+                            .expect("markdown should be present for real replay case");
+                        assert_eq!(payload.metadata.source, RichSource::ClipboardRtf);
+                        assert_eq!(markdown, expected_markdown);
+                        assert_contains_all(&markdown, case.required_terms, case.name);
+                    }
+                    CapturedContent::Plain(_) => panic!("expected rich content for replay case"),
+                },
+                CaptureRichOutcome::Failure(_) => panic!("expected success for replay case"),
+            }
+        }
+    }
+
+    #[test]
+    fn soak_replay_real_fixture_corpus_tracks_fallback_rate() {
+        let cases = replay_cases();
+        let iterations = 500usize;
+        let mut plain_outcomes = 0usize;
+        let mut markdown_from_rtf = 0usize;
+        let mut markdown_from_plain = 0usize;
+        let mut expected_plain_fallbacks = 0usize;
+
+        for i in 0..iterations {
+            let case = cases[i % cases.len()];
+            if case.expect_markdown_from_plain {
+                expected_plain_fallbacks += 1;
+            }
+
+            let plain_text = format!("plain capture from engine #{i}");
+            let platform = StubPlatform {
+                app: Some(ActiveApp {
+                    bundle_id: "app.rich".to_string(),
+                    name: "Rich App".to_string(),
+                }),
+                responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                    plain_text.clone(),
+                )])),
+                cleanup: CleanupStatus::Clean,
+            };
+            let reader = StubReader {
+                payload: Some(RichClipboardPayload {
+                    plain_text: Some(format!("clipboard mismatch #{i}")),
+                    html: None,
+                    rtf: Some(with_line_ending_variant(case.rtf, i)),
+                }),
+            };
+            let mut options = rich_options();
+            options.conversion = Some(RichConversion::Markdown);
+            options.require_plain_text_match = false;
+
+            let out = capture_rich_with_reader(
+                &platform,
+                &StubStore,
+                &NeverCancel,
+                &[&NoAdapters],
+                &options,
+                &reader,
+            );
+
+            match out {
+                CaptureRichOutcome::Success(success) => match success.content {
+                    CapturedContent::Rich(payload) => {
+                        let markdown = payload
+                            .markdown
+                            .expect("markdown should always be populated during soak replay");
+                        assert_eq!(payload.metadata.source, RichSource::ClipboardRtf);
+
+                        if case.expect_markdown_from_plain {
+                            assert_eq!(markdown, plain_text);
+                            markdown_from_plain += 1;
+                        } else {
+                            assert_ne!(markdown, plain_text);
+                            assert_contains_all(&markdown, case.required_terms, case.name);
+                            markdown_from_rtf += 1;
+                        }
+                    }
+                    CapturedContent::Plain(_) => {
+                        plain_outcomes += 1;
+                    }
+                },
+                CaptureRichOutcome::Failure(_) => panic!("expected success during soak replay"),
+            }
+        }
+
+        assert_eq!(
+            plain_outcomes, 0,
+            "unexpected plain rich outcomes during soak"
+        );
+        assert_eq!(markdown_from_plain, expected_plain_fallbacks);
+        assert_eq!(
+            markdown_from_rtf + markdown_from_plain,
+            iterations,
+            "every soak iteration must produce markdown"
+        );
+        assert!(markdown_from_rtf > markdown_from_plain);
     }
 }

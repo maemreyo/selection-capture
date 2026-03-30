@@ -197,6 +197,15 @@ fn normalize_plain_text(input: &str) -> String {
 mod tests {
     use super::*;
 
+    fn assert_contains_all(haystack: &str, needles: &[&str]) {
+        for needle in needles {
+            assert!(
+                haystack.contains(needle),
+                "expected markdown to contain `{needle}`, got:\n{haystack}"
+            );
+        }
+    }
+
     #[test]
     fn converts_html_to_markdownish_text() {
         let markdown =
@@ -341,6 +350,58 @@ mod tests {
         assert!(!sanitized.contains(r"{\info"));
         assert!(!sanitized.contains(r"{\*\generator"));
         assert!(sanitized.contains("Meeting notes:"));
+    }
+
+    #[test]
+    fn converts_real_slack_fixture_with_expected_terms() {
+        let rtf = include_str!("../tests/fixtures/rich/real/slack-thread-export.rtf");
+        let markdown =
+            convert_to_markdown(None, Some(rtf), "").expect("slack fixture should convert");
+        assert_contains_all(
+            &markdown,
+            &[
+                "Slack digest:",
+                "Deploy succeeded",
+                "Follow-up in thread",
+                "cargo test --features rich-content",
+                "open thread",
+            ],
+        );
+    }
+
+    #[test]
+    fn converts_real_notion_fixture_and_ignores_info_metadata() {
+        let rtf = include_str!("../tests/fixtures/rich/real/notion-checklist-export.rtf");
+        let markdown =
+            convert_to_markdown(None, Some(rtf), "").expect("notion fixture should convert");
+        assert_contains_all(
+            &markdown,
+            &[
+                "Notion page: Sprint Checklist",
+                "Stabilize conversion on CRLF",
+                "Add replay corpus for real payloads",
+                "Preserve escaped braces {ok}",
+                "Quote: Quality over luck.",
+            ],
+        );
+        assert!(!markdown.contains("Notion Exporter"));
+    }
+
+    #[test]
+    fn converts_real_teams_fixture_with_escaped_chars_intact() {
+        let rtf = include_str!("../tests/fixtures/rich/real/teams-chat-export.rtf");
+        let markdown =
+            convert_to_markdown(None, Some(rtf), "").expect("teams fixture should convert");
+        assert_contains_all(
+            &markdown,
+            &[
+                "Teams chat recap:",
+                "windows-beta and linux-alpha",
+                "CI gate: make ci",
+                r"Escaped path: C:\repo\selection-capture\tests",
+                "Braces sample: {rich}",
+            ],
+        );
     }
 
     #[test]
