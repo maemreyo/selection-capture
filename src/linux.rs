@@ -14,7 +14,9 @@ use crate::linux_subscriber::ensure_linux_native_subscriber_hook_installed;
 #[cfg(all(feature = "rich-content", target_os = "linux"))]
 use crate::rich_convert::plain_text_to_minimal_rtf;
 use crate::traits::{CapturePlatform, MonitorPlatform};
-use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
+use crate::types::{ActiveApp, CGRect, CaptureMethod, CleanupStatus, PlatformAttemptResult};
+#[cfg(target_os = "linux")]
+use crate::types::{CGPoint, CGSize};
 use std::collections::VecDeque;
 #[cfg(target_os = "linux")]
 use std::env;
@@ -340,6 +342,17 @@ impl CapturePlatform for LinuxPlatform {
         #[cfg(target_os = "linux")]
         {
             read_active_app().ok().flatten()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
+    }
+
+    fn focused_window_frame(&self) -> Option<CGRect> {
+        #[cfg(target_os = "linux")]
+        {
+            read_focused_window_frame().ok().flatten()
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -673,6 +686,172 @@ fn read_process_exe_path(pid: u32) -> Result<Option<String>, String> {
     } else {
         Ok(Some(path.to_string()))
     }
+}
+
+#[cfg(target_os = "linux")]
+fn read_focused_window_frame() -> Result<Option<CGRect>, String> {
+    if let Ok(frame) = read_focused_window_frame_by_xdotool() {
+        return Ok(frame);
+    }
+    read_focused_window_frame_by_atspi()
+}
+
+#[cfg(target_os = "linux")]
+fn read_focused_window_frame_by_xdotool() -> Result<Option<CGRect>, String> {
+    let output = Command::new("xdotool")
+        .args(["getactivewindow", "getwindowgeometry", "--shell"])
+        .output()
+        .map_err(|err| err.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+    let mut x = None;
+    let mut y = None;
+    let mut width = None;
+    let mut height = None;
+
+    for line in stdout.lines() {
+        if let Some((key, value)) = line.split_once('=') {
+            match key.trim() {
+                "X" => x = value.trim().parse::<f64>().ok(),
+                "Y" => y = value.trim().parse::<f64>().ok(),
+                "WIDTH" => width = value.trim().parse::<f64>().ok(),
+                "HEIGHT" => height = value.trim().parse::<f64>().ok(),
+                _ => {}
+            }
+        }
+    }
+
+    match (x, y, width, height) {
+        (Some(x), Some(y), Some(width), Some(height)) if width > 0.0 && height > 0.0 => {
+            Ok(Some(CGRect {
+                origin: CGPoint { x, y },
+                size: CGSize { width, height },
+            }))
+        }
+        _ => Ok(None),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_focused_window_frame_by_atspi() -> Result<Option<CGRect>, String> {
+    let script = r#"
+import re
+import subprocess
+import sys
+
+def call(cmd):
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout).strip())
+    return proc.stdout.strip()
+
+def parse_address(output):
+    match = re.search(r"'([^']+)'", output)
+    return match.group(1) if match else None
+
+def parse_reference(output):
+    match = re.search(r"\('([^']+)'\s*,\s*objectpath\s*'([^']+)'\)", output)
+    if not match:
+        match = re.search(r"\('([^']+)'\s*,\s*'([^']+)'\)", output)
+    if not match:
+        return None, None
+    return match.group(1), match.group(2)
+
+def parse_extents(output):
+    vals = [int(v) for v in re.findall(r"-?\d+", output)]
+    if len(vals) >= 4:
+        return vals[0], vals[1], vals[2], vals[3]
+    return None
+
+try:
+    addr_out = call([
+        "gdbus", "call",
+        "--session",
+        "--dest", "org.a11y.Bus",
+        "--object-path", "/org/a11y/bus",
+        "--method", "org.a11y.Bus.GetAddress",
+    ])
+    address = parse_address(addr_out)
+    if not address:
+        print("")
+        sys.exit(0)
+
+    active_out = call([
+        "gdbus", "call",
+        "--address", address,
+        "--dest", "org.a11y.atspi.Registry",
+        "--object-path", "/org/a11y/atspi/accessible/root",
+        "--method", "org.a11y.atspi.Collection.GetActiveDescendant",
+    ])
+    bus, path = parse_reference(active_out)
+    if not bus or not path or path == "/org/a11y/atspi/null":
+        print("")
+        sys.exit(0)
+
+    # CoordType::Screen = 0
+    extents_out = call([
+        "gdbus", "call",
+        "--address", address,
+        "--dest", bus,
+        "--object-path", path,
+        "--method", "org.a11y.atspi.Component.GetExtents",
+        "0",
+    ])
+    extents = parse_extents(extents_out)
+    if not extents:
+        print("")
+        sys.exit(0)
+    x, y, w, h = extents
+    if w <= 0 or h <= 0:
+        print("")
+        sys.exit(0)
+    print(f"{x},{y},{w},{h}")
+except Exception as err:
+    sys.stderr.write(str(err))
+    sys.exit(1)
+"#;
+
+    let output = Command::new("python3")
+        .args(["-c", script])
+        .output()
+        .map_err(|err| err.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+    parse_linux_rect_line(&stdout)
+}
+
+#[cfg(target_os = "linux")]
+fn parse_linux_rect_line(stdout: &str) -> Result<Option<CGRect>, String> {
+    let line = stdout.trim();
+    if line.is_empty() {
+        return Ok(None);
+    }
+    let parts = line.split(',').map(str::trim).collect::<Vec<_>>();
+    if parts.len() != 4 {
+        return Ok(None);
+    }
+
+    let x = parts[0].parse::<f64>().map_err(|err| err.to_string())?;
+    let y = parts[1].parse::<f64>().map_err(|err| err.to_string())?;
+    let width = parts[2].parse::<f64>().map_err(|err| err.to_string())?;
+    let height = parts[3].parse::<f64>().map_err(|err| err.to_string())?;
+
+    if width <= 0.0 || height <= 0.0 {
+        return Ok(None);
+    }
+
+    Ok(Some(CGRect {
+        origin: CGPoint { x, y },
+        size: CGSize { width, height },
+    }))
 }
 
 #[cfg(test)]

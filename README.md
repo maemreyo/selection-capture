@@ -30,8 +30,8 @@ with explicit capture status and trace metadata for app-level UX decisions.
 ## Platform Support
 
 - **macOS**: Fully implemented (`MacOSPlatform`)
-- **Windows**: `windows-beta` includes real clipboard reads, foreground active-app lookup, and initial UIA + legacy IAccessible focused-element capture paths
-- **Linux**: `linux-alpha` includes shell-backed clipboard/primary-selection reads, active-app lookup, and AT-SPI focused-descendant capture
+- **Windows**: `windows-beta` includes real clipboard reads, foreground active-app lookup, initial UIA + legacy IAccessible focused-element capture paths, and focused-window frame extraction (`GetWindowRect`)
+- **Linux**: `linux-alpha` includes shell-backed clipboard/primary-selection reads, active-app lookup, AT-SPI focused-descendant capture, and focused-window frame extraction (`xdotool` with AT-SPI fallback)
 - **Other platforms**: Portable API via `CapturePlatform` trait, implementations welcome!
 
 Experimental monitoring support is scaffolded with a generic `MonitorPlatform` trait plus
@@ -122,6 +122,7 @@ fn main() {
 - `capture(...)` → `CaptureOutcome` - The primary capture function
 - `try_capture(...)` → `Result<CaptureOutcome, WouldBlock>` - Non-blocking single-pass variant
 - `capture_async(...).await` → `CaptureOutcome` - Optional Tokio-backed wrapper behind the `async` feature
+- `capture_window_frame(...)` → `Option<CGRect>` - Snapshot focused-window bounds without running text capture
 - `capture_rich(...)` → `CaptureRichOutcome` - Optional rich-content capture behind `rich-content`
 - `try_capture_rich(...)` → `Result<CaptureRichOutcome, WouldBlock>` - Non-blocking rich variant behind `rich-content`
 
@@ -220,7 +221,11 @@ Current limitations:
 - `CaptureStatus` - Detailed status codes for deterministic UX mapping
 - `FailureKind` - Categorization of failure modes
 - `CaptureTrace` - Complete trace of all attempts made
-- `CaptureSuccess.focused_window_frame` - Focused window bounds (`Option<CGRect>`) for monitor-aware consumers
+- `CaptureSuccess.focused_window_frame` - Focused window bounds (`Option<CGRect>`) for monitor-aware consumers (macOS: AX with `active-win-pos-rs` fallback, Windows: `GetWindowRect`, Linux: `xdotool`/AT-SPI fallback)
+
+`capture(...)` now snapshots focused-window bounds at the start of a capture call and carries that
+snapshot into `CaptureSuccess.focused_window_frame` to reduce focus-shift races (for example when
+synthetic copy or shortcut handling moves focus before completion).
 
 ### Rich Content Capture (`rich-content` feature)
 

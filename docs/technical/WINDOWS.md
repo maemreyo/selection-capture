@@ -13,6 +13,8 @@ What exists today:
   - Clipboard
 - Clipboard path reads real clipboard text via PowerShell (`Get-Clipboard -Raw`) on Windows.
 - Active app detection is available on Windows via foreground-window process lookup.
+- Focused window frame extraction is available via user32 `GetForegroundWindow` + `GetWindowRect`
+  and is exposed through `CaptureSuccess.focused_window_frame`.
 - UI Automation primary path uses PowerShell/.NET UIAutomation against the focused element
   (`TextPattern` first, `ValuePattern` fallback).
 - IAccessible range path uses `LegacyIAccessiblePattern` (`Value` first, `Name` fallback).
@@ -89,6 +91,8 @@ Current `CaptureMethod` mapping in `WindowsPlatform`:
 ## Known Limitations
 
 - Active app detection depends on PowerShell/user32 lookup and may fail in restricted sessions.
+- Focused window frame extraction currently uses the foreground top-level window bounds and may not
+  match inner control geometry in complex UI trees.
 - UI Automation capture depends on the focused element exposing `TextPattern` or `ValuePattern`;
   many desktop apps still return empty values.
 - Legacy IAccessible capture depends on `LegacyIAccessiblePattern`; many apps do not expose useful

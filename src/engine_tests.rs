@@ -5,6 +5,9 @@ use crate::traits::{AppAdapter, AppProfileStore, CancelSignal, CapturePlatform};
 use crate::types::{
     ActiveApp, CaptureOptions, CaptureStatus, CleanupStatus, PlatformAttemptResult, WouldBlock,
 };
+#[cfg(not(target_os = "macos"))]
+use crate::types::{CGPoint, CGRect, CGSize};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -69,6 +72,25 @@ fn test_guard() -> std::sync::MutexGuard<'static, ()> {
     guard
 }
 
+#[cfg(target_os = "macos")]
+fn test_rect() -> crate::types::CGRect {
+    crate::types::CGRect::new(
+        &crate::types::CGPoint::new(10.0, 20.0),
+        &crate::types::CGSize::new(300.0, 200.0),
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn test_rect() -> crate::types::CGRect {
+    CGRect {
+        origin: CGPoint { x: 10.0, y: 20.0 },
+        size: CGSize {
+            width: 300.0,
+            height: 200.0,
+        },
+    }
+}
+
 #[test]
 fn collect_trace_true_always_returns_trace() {
     let _guard = test_guard();
@@ -96,6 +118,62 @@ fn collect_trace_true_always_returns_trace() {
     match out {
         CaptureOutcome::Success(success) => assert!(success.trace.is_some()),
         CaptureOutcome::Failure(_) => panic!("expected success"),
+    }
+}
+
+#[test]
+fn success_keeps_initial_window_frame_snapshot_even_if_focus_changes() {
+    struct SnapshotPlatform {
+        reads: AtomicUsize,
+    }
+
+    impl CapturePlatform for SnapshotPlatform {
+        fn active_app(&self) -> Option<ActiveApp> {
+            None
+        }
+
+        fn attempt(
+            &self,
+            _method: CaptureMethod,
+            _app: Option<&ActiveApp>,
+        ) -> PlatformAttemptResult {
+            PlatformAttemptResult::Success("hello".to_string())
+        }
+
+        fn focused_window_frame(&self) -> Option<crate::types::CGRect> {
+            if self.reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                Some(test_rect())
+            } else {
+                None
+            }
+        }
+
+        fn cleanup(&self) -> CleanupStatus {
+            CleanupStatus::Clean
+        }
+    }
+
+    let _guard = test_guard();
+    let platform = SnapshotPlatform {
+        reads: AtomicUsize::new(0),
+    };
+    let store = StubStore;
+    let cancel = NeverCancel;
+    let adapter = NoAdapters;
+    let mut options = CaptureOptions {
+        collect_trace: false,
+        ..CaptureOptions::default()
+    };
+    options.retry_policy.primary_accessibility = vec![Duration::ZERO];
+    options.retry_policy.range_accessibility = vec![Duration::ZERO];
+    options.retry_policy.clipboard = vec![Duration::ZERO];
+
+    let out = capture(&platform, &store, &cancel, &[&adapter], &options);
+    match out {
+        CaptureOutcome::Success(success) => {
+            assert!(success.focused_window_frame.is_some());
+        }
+        other => panic!("expected success, got {other:?}"),
     }
 }
 

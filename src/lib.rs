@@ -114,3 +114,8 @@ pub use windows_subscriber::{
     ensure_windows_native_subscriber_hook_installed, set_windows_native_runtime_adapter,
     windows_native_subscriber_stats, WindowsNativeRuntimeAdapter, WindowsNativeSubscriberStats,
 };
+
+/// Reads the currently focused window frame from the platform without running text capture.
+pub fn capture_window_frame(platform: &impl CapturePlatform) -> Option<CGRect> {
+    platform.focused_window_frame()
+}

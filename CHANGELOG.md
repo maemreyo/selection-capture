@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Windows: `CapturePlatform::focused_window_frame()` now resolves foreground window bounds via
+  `GetForegroundWindow` + `GetWindowRect`
+- Linux: `CapturePlatform::focused_window_frame()` now resolves focused window bounds via
+  `xdotool getwindowgeometry --shell` with AT-SPI `Component.GetExtents` fallback
+- New top-level helper: `capture_window_frame(&impl CapturePlatform) -> Option<CGRect>`
+- macOS convenience API: `MacOSPlatform::capture_window_frame() -> Option<CGRect>`
+
+### Changed
+- Windows/Linux docs and README now describe platform-specific `focused_window_frame` behavior and
+  runtime tool dependencies
+- `capture()` and `try_capture()` now snapshot focused-window frame at call start and reuse that
+  value in `CaptureSuccess.focused_window_frame` (with end-of-capture fallback probe)
+- macOS `focused_window_frame` now falls back to `active-win-pos-rs` window bounds when AX returns
+  `None`
+
 ## [0.1.4] - 2026-03-30
 
 ### Added

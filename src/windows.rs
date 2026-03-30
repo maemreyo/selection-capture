@@ -1,7 +1,9 @@
 #[cfg(all(feature = "rich-content", target_os = "windows"))]
 use crate::rich_convert::plain_text_to_minimal_rtf;
 use crate::traits::{CapturePlatform, MonitorPlatform};
-use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
+use crate::types::{ActiveApp, CGRect, CaptureMethod, CleanupStatus, PlatformAttemptResult};
+#[cfg(target_os = "windows")]
+use crate::types::{CGPoint, CGSize};
 use crate::windows_observer::{
     drain_events_for_monitor as windows_observer_drain_events_for_monitor, WindowsObserverBridge,
 };
@@ -359,6 +361,17 @@ impl CapturePlatform for WindowsPlatform {
         }
     }
 
+    fn focused_window_frame(&self) -> Option<CGRect> {
+        #[cfg(target_os = "windows")]
+        {
+            return read_focused_window_frame().ok().flatten();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            None
+        }
+    }
+
     fn attempt(&self, method: CaptureMethod, _app: Option<&ActiveApp>) -> PlatformAttemptResult {
         Self::dispatch_attempt(&self.backend(), method)
     }
@@ -616,6 +629,88 @@ Write-Output ("PATH:" + $path)
 
     let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
     Ok(parse_active_app_stdout(&stdout))
+}
+
+#[cfg(target_os = "windows")]
+fn read_focused_window_frame() -> Result<Option<CGRect>, String> {
+    let script = r#"
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32 {
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT {
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+  }
+}
+"@
+
+$hwnd = [Win32]::GetForegroundWindow()
+if ($hwnd -eq [IntPtr]::Zero) { return }
+
+$rect = New-Object Win32+RECT
+if (-not [Win32]::GetWindowRect($hwnd, [ref]$rect)) { return }
+
+$width = $rect.Right - $rect.Left
+$height = $rect.Bottom - $rect.Top
+if ($width -le 0 -or $height -le 0) { return }
+
+Write-Output "$($rect.Left),$($rect.Top),$width,$height"
+"#;
+
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ])
+        .output()
+        .map_err(|err| err.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
+    parse_windows_rect_line(&stdout)
+}
+
+#[cfg(target_os = "windows")]
+fn parse_windows_rect_line(stdout: &str) -> Result<Option<CGRect>, String> {
+    let line = stdout.trim();
+    if line.is_empty() {
+        return Ok(None);
+    }
+
+    let parts = line.split(',').map(str::trim).collect::<Vec<_>>();
+    if parts.len() != 4 {
+        return Ok(None);
+    }
+
+    let left = parts[0].parse::<f64>().map_err(|err| err.to_string())?;
+    let top = parts[1].parse::<f64>().map_err(|err| err.to_string())?;
+    let width = parts[2].parse::<f64>().map_err(|err| err.to_string())?;
+    let height = parts[3].parse::<f64>().map_err(|err| err.to_string())?;
+
+    if width <= 0.0 || height <= 0.0 {
+        return Ok(None);
+    }
+
+    Ok(Some(CGRect {
+        origin: CGPoint { x: left, y: top },
+        size: CGSize { width, height },
+    }))
 }
 
 #[cfg(target_os = "windows")]

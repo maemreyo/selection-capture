@@ -15,7 +15,7 @@ use accessibility_sys_ng::{
     kAXFocusedUIElementChangedNotification, kAXSelectedTextChangedNotification, pid_t,
     AXObserverRef, AXUIElementRef,
 };
-use active_win_pos_rs::get_active_window;
+use active_win_pos_rs::{get_active_window, WindowPosition};
 use core_foundation::runloop::{kCFRunLoopDefaultMode, CFRunLoop};
 use macos_accessibility_client::accessibility::application_is_trusted;
 use std::collections::VecDeque;
@@ -117,6 +117,11 @@ impl MacOSPlatform {
         Self {
             cleanup_status: Mutex::new(CleanupStatus::Clean),
         }
+    }
+
+    /// Returns the currently focused window frame via AX without running text capture.
+    pub fn capture_window_frame(&self) -> Option<CGRect> {
+        focused_window_frame_by_ax().or_else(focused_window_frame_by_window_list)
     }
 
     fn reset_cleanup(&self) {
@@ -435,7 +440,7 @@ impl CapturePlatform for MacOSPlatform {
     }
 
     fn focused_window_frame(&self) -> Option<CGRect> {
-        focused_window_frame_by_ax()
+        self.capture_window_frame()
     }
 
     fn attempt(&self, method: CaptureMethod, _app: Option<&ActiveApp>) -> PlatformAttemptResult {
@@ -631,6 +636,22 @@ fn bundle_id_from_process_path(path: &Path) -> String {
     }
 
     PathBuf::from(path).to_string_lossy().to_string()
+}
+
+fn focused_window_frame_by_window_list() -> Option<CGRect> {
+    let window = get_active_window().ok()?;
+    window_position_to_cgrect(window.position)
+}
+
+fn window_position_to_cgrect(position: WindowPosition) -> Option<CGRect> {
+    if position.width <= 0.0 || position.height <= 0.0 {
+        return None;
+    }
+
+    Some(CGRect::new(
+        &crate::types::CGPoint::new(position.x, position.y),
+        &crate::types::CGSize::new(position.width, position.height),
+    ))
 }
 
 fn app_bundle_root(path: &Path) -> Option<PathBuf> {

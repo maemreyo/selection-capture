@@ -15,6 +15,9 @@ What exists today:
   - Wayland: `wl-paste`
   - X11: `xclip` / `xsel`
 - Active app detection is available through `xdotool` (active window PID) plus `ps`/`readlink`.
+- Focused window frame extraction is available through `xdotool getwindowgeometry --shell`, with
+  AT-SPI `Component.GetExtents` fallback, and is exposed through
+  `CaptureSuccess.focused_window_frame`.
 - AT-SPI primary path attempts focused-descendant text reads over the accessibility bus
   (`org.a11y.Bus` + `org.a11y.atspi.*` via `gdbus`).
 - Dispatch behavior and engine-level fallback behavior are covered by unit and smoke tests.
@@ -102,6 +105,8 @@ In addition, backend command plans are session-aware:
   usable `Text`/`Accessible` data on the a11y bus.
 - Active app detection depends on `xdotool`, `ps`, and `/proc` (`readlink`) and may fail on
   restricted Wayland sessions or minimal desktop environments.
+- Focused window frame extraction depends on `xdotool` or AT-SPI (`python3` + `gdbus`) and may
+  return `None` in sandboxed sessions or desktops that hide active-window geometry.
 - `AccessibilityRange` is mapped to primary-selection reads and may be unavailable on restricted
   Wayland/X11 sessions.
 - `SyntheticCopy` currently shares the clipboard dispatch slot (no Linux key-synthesis path yet).

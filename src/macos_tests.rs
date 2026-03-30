@@ -1,5 +1,6 @@
 use super::*;
 use crate::AxObserverBridge;
+use active_win_pos_rs::WindowPosition;
 use std::collections::VecDeque;
 use std::sync::{Mutex, OnceLock};
 
@@ -59,6 +60,22 @@ fn bundle_root_falls_back_to_process_path() {
     let path = PathBuf::from("/usr/local/bin/code");
     let bundle = bundle_id_from_process_path(&path);
     assert_eq!(bundle, "/usr/local/bin/code");
+}
+
+#[test]
+fn window_position_to_cgrect_maps_valid_geometry() {
+    let rect = window_position_to_cgrect(WindowPosition::new(12.0, 34.0, 800.0, 600.0))
+        .expect("valid window rect");
+    assert_eq!(rect.origin.x, 12.0);
+    assert_eq!(rect.origin.y, 34.0);
+    assert_eq!(rect.size.width, 800.0);
+    assert_eq!(rect.size.height, 600.0);
+}
+
+#[test]
+fn window_position_to_cgrect_rejects_non_positive_size() {
+    assert!(window_position_to_cgrect(WindowPosition::new(12.0, 34.0, 0.0, 100.0)).is_none());
+    assert!(window_position_to_cgrect(WindowPosition::new(12.0, 34.0, 100.0, -1.0)).is_none());
 }
 
 #[test]

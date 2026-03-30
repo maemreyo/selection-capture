@@ -28,6 +28,7 @@ pub fn capture(
 ) -> CaptureOutcome {
     let start = Instant::now();
     let deadline = start + options.overall_timeout;
+    let focused_window_frame_snapshot = platform.focused_window_frame();
 
     let mut trace = if options.collect_trace {
         Some(CaptureTrace::default())
@@ -139,7 +140,14 @@ pub fn capture(
 
         if let PlatformAttemptResult::Success(text) = result {
             push_trace(&mut trace, TraceEvent::MethodSucceeded(method));
-            return finish_success(platform, trace, text, method, start);
+            return finish_success(
+                platform,
+                trace,
+                text,
+                method,
+                start,
+                focused_window_frame_snapshot,
+            );
         }
         if let Some(kind) = record_attempt_failure(&mut trace, method, &result) {
             last_failure = Some(kind);
@@ -181,6 +189,7 @@ pub fn try_capture(
 ) -> Result<CaptureOutcome, WouldBlock> {
     let start = Instant::now();
     let deadline = start + options.overall_timeout;
+    let focused_window_frame_snapshot = platform.focused_window_frame();
 
     let mut trace = if options.collect_trace {
         Some(CaptureTrace::default())
@@ -255,7 +264,14 @@ pub fn try_capture(
 
         if let PlatformAttemptResult::Success(text) = result {
             push_trace(&mut trace, TraceEvent::MethodSucceeded(method));
-            return Ok(finish_success(platform, trace, text, method, start));
+            return Ok(finish_success(
+                platform,
+                trace,
+                text,
+                method,
+                start,
+                focused_window_frame_snapshot,
+            ));
         }
         if let Some(kind) = record_attempt_failure(&mut trace, method, &result) {
             last_failure = Some(kind);
@@ -420,13 +436,15 @@ fn finish_success(
     text: String,
     method: CaptureMethod,
     started_at: Instant,
+    focused_window_frame_snapshot: Option<crate::types::CGRect>,
 ) -> CaptureOutcome {
     let cleanup_status = platform.cleanup();
     finalize_trace(&mut trace, cleanup_status, started_at.elapsed());
     CaptureOutcome::Success(CaptureSuccess {
         text,
         method,
-        focused_window_frame: platform.focused_window_frame(),
+        focused_window_frame: focused_window_frame_snapshot
+            .or_else(|| platform.focused_window_frame()),
         trace,
     })
 }
