@@ -655,9 +655,9 @@ fn parse_active_app_stdout(stdout: &str) -> Option<ActiveApp> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::windows_observer::windows_observer_test_lock;
     use crate::windows_subscriber::windows_native_subscriber_stats;
     use crate::WindowsObserverBridge;
-    use std::sync::{Mutex, OnceLock};
 
     #[derive(Debug)]
     struct StubBackend {
@@ -683,11 +683,6 @@ mod tests {
         fn attempt_synthetic_copy(&self) -> PlatformAttemptResult {
             self.synthetic_copy.clone()
         }
-    }
-
-    fn test_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
     }
 
     #[test]
@@ -719,7 +714,9 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_preferred_uses_event_pump_when_available() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         fn pump() -> Vec<String> {
             vec![
                 "  native a ".to_string(),
@@ -747,7 +744,9 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_preferred_uses_bridge_drain_by_default() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         let _ = WindowsObserverBridge::stop();
         let _ = WindowsObserverBridge::start();
         assert!(WindowsObserverBridge::push_event("bridge one"));
@@ -774,7 +773,9 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_preferred_releases_bridge_on_drop() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         let _ = WindowsObserverBridge::stop();
 
         {
@@ -793,7 +794,9 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_preferred_transitions_subscriber_manager_lifecycle() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         let _ = WindowsObserverBridge::stop();
         let before = windows_native_subscriber_stats();
 
@@ -816,7 +819,9 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_preferred_applies_queue_capacity() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         let monitor = WindowsSelectionMonitor::new_with_options(WindowsSelectionMonitorOptions {
             poll_interval: Duration::from_millis(10),
             backend: WindowsMonitorBackend::NativeEventPreferred,

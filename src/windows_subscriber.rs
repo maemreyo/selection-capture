@@ -120,16 +120,13 @@ fn reset_windows_native_subscriber_for_tests() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
-
-    fn test_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
+    use crate::windows_observer::windows_observer_test_lock;
 
     #[test]
     fn lifecycle_hook_drives_subscriber_stats() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         let _ = WindowsObserverBridge::stop();
         WindowsObserverBridge::set_lifecycle_hook(None);
         reset_windows_native_subscriber_for_tests();
@@ -156,7 +153,9 @@ mod tests {
             false
         }
 
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         let _ = WindowsObserverBridge::stop();
         WindowsObserverBridge::set_lifecycle_hook(None);
         reset_windows_native_subscriber_for_tests();

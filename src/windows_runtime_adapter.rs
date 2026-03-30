@@ -421,18 +421,14 @@ mod tests {
     use super::*;
     use crate::{
         ensure_windows_native_subscriber_hook_installed, windows_native_subscriber_stats,
-        WindowsObserverBridge,
+        windows_observer::windows_observer_test_lock, WindowsObserverBridge,
     };
-    use std::sync::{Mutex, OnceLock};
-
-    fn test_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     #[test]
     fn installing_default_adapter_enables_lifecycle_attempt_tracking() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         let _ = WindowsObserverBridge::stop();
         WindowsObserverBridge::set_lifecycle_hook(None);
         reset_windows_default_runtime_adapter_state();
@@ -453,7 +449,9 @@ mod tests {
 
     #[test]
     fn default_adapter_state_tracks_attach_detach_idempotently() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         reset_windows_default_runtime_adapter_state();
         assert_eq!(
             windows_default_runtime_adapter_state(),
@@ -490,7 +488,9 @@ mod tests {
     #[test]
     #[cfg(target_os = "windows")]
     fn listener_restart_updates_telemetry_after_forced_kill() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         let _ = WindowsObserverBridge::stop();
         WindowsObserverBridge::set_lifecycle_hook(None);
         reset_windows_default_runtime_adapter_state();

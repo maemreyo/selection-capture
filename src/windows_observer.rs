@@ -21,6 +21,12 @@ fn lifecycle_hook() -> &'static Mutex<Option<WindowsObserverLifecycleHook>> {
     HOOK.get_or_init(|| Mutex::new(None))
 }
 
+#[cfg(test)]
+pub(crate) fn windows_observer_test_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
 pub struct WindowsObserverBridge;
 
 impl WindowsObserverBridge {
@@ -157,12 +163,6 @@ pub fn drain_events_for_monitor() -> Vec<String> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-    use std::sync::{Mutex, OnceLock};
-
-    fn test_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     fn reset_state() {
         OBSERVER_ACTIVE.store(false, Ordering::SeqCst);
@@ -176,7 +176,9 @@ mod tests {
 
     #[test]
     fn observer_requires_active_state_to_accept_events() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         reset_state();
         assert!(!WindowsObserverBridge::push_event("hello"));
         assert!(WindowsObserverBridge::start());
@@ -189,7 +191,9 @@ mod tests {
 
     #[test]
     fn observer_dedups_tail_events() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         reset_state();
         assert!(WindowsObserverBridge::start());
         assert!(WindowsObserverBridge::push_event("a"));
@@ -203,7 +207,9 @@ mod tests {
 
     #[test]
     fn observer_stop_returns_previous_state() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         reset_state();
         assert!(!WindowsObserverBridge::stop());
         assert!(WindowsObserverBridge::start());
@@ -213,7 +219,9 @@ mod tests {
 
     #[test]
     fn observer_acquire_release_tracks_lifecycle() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         reset_state();
         assert!(WindowsObserverBridge::acquire());
         assert!(WindowsObserverBridge::is_active());
@@ -226,7 +234,9 @@ mod tests {
 
     #[test]
     fn observer_stop_clears_queued_events() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         reset_state();
         assert!(WindowsObserverBridge::start());
         assert!(WindowsObserverBridge::push_event("queued"));
@@ -247,7 +257,9 @@ mod tests {
             }
         }
 
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = windows_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         reset_state();
         STARTED.store(0, AtomicOrdering::SeqCst);
         STOPPED.store(0, AtomicOrdering::SeqCst);
