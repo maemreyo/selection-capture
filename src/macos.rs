@@ -37,7 +37,7 @@ pub struct MacOSSelectionMonitor {
     native_event_queue: Mutex<VecDeque<String>>,
     native_events_dropped: Mutex<u64>,
     native_queue_capacity: usize,
-    pub poll_interval: Duration,
+    poll_interval: Duration,
     backend: MacOSMonitorBackend,
     native_observer_active: bool,
     native_observer_attached: bool,
@@ -121,11 +121,12 @@ impl MacOSPlatform {
     }
 
     fn reset_cleanup(&self) {
-        *self.cleanup_status.lock().unwrap() = CleanupStatus::Clean;
+        *self.cleanup_status.lock().unwrap_or_else(|e| e.into_inner()) = CleanupStatus::Clean;
     }
 
     fn mark_cleanup_failed(&self) {
-        *self.cleanup_status.lock().unwrap() = CleanupStatus::ClipboardRestoreFailed;
+        *self.cleanup_status.lock().unwrap_or_else(|e| e.into_inner()) =
+            CleanupStatus::ClipboardRestoreFailed;
     }
 
     fn active_app_inner(&self) -> Option<ActiveApp> {
@@ -248,6 +249,10 @@ impl MacOSSelectionMonitor {
 
     pub fn backend(&self) -> MacOSMonitorBackend {
         self.backend
+    }
+
+    pub fn poll_interval(&self) -> Duration {
+        self.poll_interval
     }
 
     pub fn native_observer_active(&self) -> bool {
@@ -436,7 +441,7 @@ impl CapturePlatform for MacOSPlatform {
     }
 
     fn cleanup(&self) -> CleanupStatus {
-        let mut guard = self.cleanup_status.lock().unwrap();
+        let mut guard = self.cleanup_status.lock().unwrap_or_else(|e| e.into_inner());
         let status = *guard;
         *guard = CleanupStatus::Clean;
         status
@@ -480,6 +485,12 @@ fn try_enable_native_observer() -> bool {
     AxObserverBridge::acquire()
 }
 
+// SAFETY: This function is registered as a Core Foundation AXObserver callback via
+// `AXObserver::add_notification`. Core Foundation guarantees it is dispatched on the
+// run-loop thread associated with the observer — the same thread that calls
+// `NativeObserverRuntime::poll_once`. `AxObserverBridge::push_event` is `Send`-safe
+// (it acquires its own `Mutex` internally), so calling it from this C callback is sound.
+// No mutable references to observer state are held across this call boundary.
 unsafe extern "C" fn native_observer_callback(
     _observer: AXObserverRef,
     _element: AXUIElementRef,
@@ -530,6 +541,11 @@ impl NativeObserverRuntime {
     }
 
     fn poll_once(&self) {
+        // SAFETY: `CFRunLoop::run_in_mode` is called with a zero timeout so it drains
+        // pending callbacks without blocking. This is invoked only on the thread that
+        // owns the run loop (the same thread that called `AXObserver::start` and
+        // registered this callback), and `kCFRunLoopDefaultMode` is a valid, non-null
+        // static constant provided by Core Foundation.
         unsafe {
             let _ = CFRunLoop::run_in_mode(kCFRunLoopDefaultMode, Duration::from_millis(0), true);
         }
@@ -657,7 +673,11 @@ fn get_selected_rtf_by_ax() -> Result<String, String> {
         .flatten()
         .ok_or_else(|| "No RTF for selected range".to_string())?;
 
-    Ok(String::from_utf8_lossy(rtf_data.bytes()).into_owned())
+    // RTF data from the AX API is expected to be valid UTF-8. Using `from_utf8_lossy`
+    // would silently replace invalid bytes with U+FFFD, corrupting the RTF payload
+    // and causing downstream parse failures. We fail explicitly instead.
+    String::from_utf8(rtf_data.bytes().to_vec())
+        .map_err(|_| "RTF payload contains non-UTF-8 bytes".to_string())
 }
 
 #[derive(Debug, PartialEq, Eq)]

@@ -137,46 +137,12 @@ pub fn capture(
         );
         store_profile_update(store, active_app.as_ref(), method, &result);
 
-        match result {
-            PlatformAttemptResult::Success(text) => {
-                push_trace(&mut trace, TraceEvent::MethodSucceeded(method));
-                return finish_success(platform, trace, text, method, start);
-            }
-            PlatformAttemptResult::EmptySelection => {
-                push_trace(&mut trace, TraceEvent::MethodReturnedEmpty(method));
-                last_failure = Some(FailureKind::EmptySelection);
-            }
-            PlatformAttemptResult::PermissionDenied => {
-                push_trace(
-                    &mut trace,
-                    TraceEvent::MethodFailed {
-                        method,
-                        kind: FailureKind::PermissionDenied,
-                    },
-                );
-                last_failure = Some(FailureKind::PermissionDenied);
-            }
-            PlatformAttemptResult::AppBlocked => {
-                push_trace(
-                    &mut trace,
-                    TraceEvent::MethodFailed {
-                        method,
-                        kind: FailureKind::AppBlocked,
-                    },
-                );
-                last_failure = Some(FailureKind::AppBlocked);
-            }
-            PlatformAttemptResult::ClipboardBorrowAmbiguous => {
-                push_trace(
-                    &mut trace,
-                    TraceEvent::MethodFailed {
-                        method,
-                        kind: FailureKind::ClipboardAmbiguous,
-                    },
-                );
-                last_failure = Some(FailureKind::ClipboardAmbiguous);
-            }
-            PlatformAttemptResult::Unavailable => {}
+        if let PlatformAttemptResult::Success(text) = result {
+            push_trace(&mut trace, TraceEvent::MethodSucceeded(method));
+            return finish_success(platform, trace, text, method, start);
+        }
+        if let Some(kind) = record_attempt_failure(&mut trace, method, &result) {
+            last_failure = Some(kind);
         }
 
         schedule[next_index].next_attempt_idx += 1;
@@ -287,46 +253,12 @@ pub fn try_capture(
         );
         store_profile_update(store, active_app.as_ref(), method, &result);
 
-        match result {
-            PlatformAttemptResult::Success(text) => {
-                push_trace(&mut trace, TraceEvent::MethodSucceeded(method));
-                return Ok(finish_success(platform, trace, text, method, start));
-            }
-            PlatformAttemptResult::EmptySelection => {
-                push_trace(&mut trace, TraceEvent::MethodReturnedEmpty(method));
-                last_failure = Some(FailureKind::EmptySelection);
-            }
-            PlatformAttemptResult::PermissionDenied => {
-                push_trace(
-                    &mut trace,
-                    TraceEvent::MethodFailed {
-                        method,
-                        kind: FailureKind::PermissionDenied,
-                    },
-                );
-                last_failure = Some(FailureKind::PermissionDenied);
-            }
-            PlatformAttemptResult::AppBlocked => {
-                push_trace(
-                    &mut trace,
-                    TraceEvent::MethodFailed {
-                        method,
-                        kind: FailureKind::AppBlocked,
-                    },
-                );
-                last_failure = Some(FailureKind::AppBlocked);
-            }
-            PlatformAttemptResult::ClipboardBorrowAmbiguous => {
-                push_trace(
-                    &mut trace,
-                    TraceEvent::MethodFailed {
-                        method,
-                        kind: FailureKind::ClipboardAmbiguous,
-                    },
-                );
-                last_failure = Some(FailureKind::ClipboardAmbiguous);
-            }
-            PlatformAttemptResult::Unavailable => {}
+        if let PlatformAttemptResult::Success(text) = result {
+            push_trace(&mut trace, TraceEvent::MethodSucceeded(method));
+            return Ok(finish_success(platform, trace, text, method, start));
+        }
+        if let Some(kind) = record_attempt_failure(&mut trace, method, &result) {
+            last_failure = Some(kind);
         }
 
         if delays.len() > 1 {
@@ -392,6 +324,53 @@ fn store_profile_update(
         record_method_outcome(&app.bundle_id, method, result);
         let update: AppProfileUpdate = update_for_method_result(method, result);
         store.merge_update(app, update);
+    }
+}
+
+/// Records trace events for a non-success attempt result and returns the resulting
+/// `FailureKind` if one applies. Returns `None` for `Unavailable` (no state change).
+/// Does NOT handle the `Success` variant — callers must check that first.
+fn record_attempt_failure(
+    trace: &mut Option<CaptureTrace>,
+    method: CaptureMethod,
+    result: &PlatformAttemptResult,
+) -> Option<FailureKind> {
+    match result {
+        PlatformAttemptResult::EmptySelection => {
+            push_trace(trace, TraceEvent::MethodReturnedEmpty(method));
+            Some(FailureKind::EmptySelection)
+        }
+        PlatformAttemptResult::PermissionDenied => {
+            push_trace(
+                trace,
+                TraceEvent::MethodFailed {
+                    method,
+                    kind: FailureKind::PermissionDenied,
+                },
+            );
+            Some(FailureKind::PermissionDenied)
+        }
+        PlatformAttemptResult::AppBlocked => {
+            push_trace(
+                trace,
+                TraceEvent::MethodFailed {
+                    method,
+                    kind: FailureKind::AppBlocked,
+                },
+            );
+            Some(FailureKind::AppBlocked)
+        }
+        PlatformAttemptResult::ClipboardBorrowAmbiguous => {
+            push_trace(
+                trace,
+                TraceEvent::MethodFailed {
+                    method,
+                    kind: FailureKind::ClipboardAmbiguous,
+                },
+            );
+            Some(FailureKind::ClipboardAmbiguous)
+        }
+        PlatformAttemptResult::Unavailable | PlatformAttemptResult::Success(_) => None,
     }
 }
 

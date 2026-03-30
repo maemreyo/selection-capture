@@ -23,7 +23,7 @@ pub struct LinuxSelectionMonitor {
     native_event_queue: Mutex<VecDeque<String>>,
     native_events_dropped: Mutex<u64>,
     native_queue_capacity: usize,
-    pub poll_interval: Duration,
+    poll_interval: Duration,
     backend: LinuxMonitorBackend,
     native_observer_attached: bool,
     native_event_pump: Option<LinuxNativeEventPump>,
@@ -372,6 +372,10 @@ impl LinuxSelectionMonitor {
 
     pub fn backend(&self) -> LinuxMonitorBackend {
         self.backend
+    }
+
+    pub fn poll_interval(&self) -> Duration {
+        self.poll_interval
     }
 
     pub fn enqueue_native_selection_event<T>(&self, text: T) -> bool

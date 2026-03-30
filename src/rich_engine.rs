@@ -13,8 +13,6 @@ use crate::traits::{AppAdapter, AppProfileStore, CancelSignal, CapturePlatform};
 use crate::types::{ActiveApp, CaptureOutcome, CaptureTrace, TraceEvent, WouldBlock};
 #[cfg(all(feature = "windows-beta", target_os = "windows"))]
 use crate::windows::try_selected_rtf_by_uia;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn capture_rich(
@@ -307,10 +305,18 @@ fn unix_epoch_millis() -> u128 {
     }
 }
 
+/// FNV-1a 64-bit hash — deterministic and stable across process restarts and Rust versions.
+/// Unlike `DefaultHasher`, this produces identical output for the same input in every run,
+/// making it safe for deduplication, change-detection, and persistent comparison.
 fn hash_text(text: &str) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    text.hash(&mut hasher);
-    hasher.finish()
+    const FNV_OFFSET: u64 = 14_695_981_039_346_656_037;
+    const FNV_PRIME: u64 = 1_099_511_628_211;
+    let mut hash = FNV_OFFSET;
+    for byte in text.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
 }
 
 #[cfg(test)]

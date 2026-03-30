@@ -44,6 +44,12 @@ const WINDOWS_RETRY_BACKOFF_BASE: Duration = Duration::from_millis(50);
 const WINDOWS_RETRY_BACKOFF_MAX: Duration = Duration::from_millis(800);
 
 #[cfg(target_os = "windows")]
+const _: () = assert!(
+    WINDOWS_RETRY_BACKOFF_MAX.as_millis() <= u64::MAX as u128,
+    "WINDOWS_RETRY_BACKOFF_MAX exceeds u64::MAX ms"
+);
+
+#[cfg(target_os = "windows")]
 fn retry_backoff_delay(attempt: u32) -> Duration {
     let factor = 1u64 << attempt.min(6);
     let millis = WINDOWS_RETRY_BACKOFF_BASE

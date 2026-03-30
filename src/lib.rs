@@ -4,6 +4,8 @@ mod async_api;
 mod ax_observer;
 mod cache;
 mod engine;
+mod native_subscriber;
+mod observer_bridge;
 #[cfg(feature = "linux-alpha")]
 mod linux;
 #[cfg(feature = "linux-alpha")]

@@ -44,6 +44,12 @@ const LINUX_RETRY_BACKOFF_BASE: Duration = Duration::from_millis(50);
 const LINUX_RETRY_BACKOFF_MAX: Duration = Duration::from_millis(800);
 
 #[cfg(target_os = "linux")]
+const _: () = assert!(
+    LINUX_RETRY_BACKOFF_MAX.as_millis() <= u64::MAX as u128,
+    "LINUX_RETRY_BACKOFF_MAX exceeds u64::MAX ms"
+);
+
+#[cfg(target_os = "linux")]
 fn retry_backoff_delay(attempt: u32) -> Duration {
     let factor = 1u64 << attempt.min(6);
     let millis = LINUX_RETRY_BACKOFF_BASE

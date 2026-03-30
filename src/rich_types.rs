@@ -1,5 +1,9 @@
 use crate::types::{ActiveApp, CaptureFailure, CaptureMethod, CaptureOptions, CaptureTrace};
 
+/// Explicit format tag for a rich-text payload.
+///
+/// Reserved for future use — currently not attached to payload fields,
+/// but preserved in the public API for upcoming typed format annotations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RichFormat {
     Html,
@@ -24,6 +28,8 @@ pub struct ContentMetadata {
     pub method: CaptureMethod,
     pub source: RichSource,
     pub captured_at_unix_ms: u128,
+    /// FNV-1a 64-bit hash of `plain_text`. Stable across process restarts and Rust
+    /// versions — safe for persistent deduplication and cross-process comparison.
     pub plain_text_hash: u64,
 }
 

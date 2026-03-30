@@ -128,11 +128,17 @@ fn assert_capture_success(
 
 #[test]
 fn windows_beta_falls_back_from_ax_to_clipboard() {
-    let platform = StubPlatform::new(vec![
-        PlatformAttemptResult::Unavailable,
-        PlatformAttemptResult::EmptySelection,
-        PlatformAttemptResult::Success("clipboard capture".into()),
-    ]);
+    let platform = StubPlatform::with_app_and_responses(
+        ActiveApp {
+            bundle_id: "com.example.fallback-isolation-windows".into(),
+            name: "Windows Test App".into(),
+        },
+        vec![
+            PlatformAttemptResult::Unavailable,
+            PlatformAttemptResult::EmptySelection,
+            PlatformAttemptResult::Success("clipboard capture".into()),
+        ],
+    );
     let store = StubStore;
     let cancel = NeverCancel;
     let adapter = NoAdapters;

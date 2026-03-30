@@ -128,11 +128,17 @@ fn assert_capture_success(
 
 #[test]
 fn linux_alpha_falls_back_from_accessibility_to_clipboard() {
-    let platform = StubPlatform::new(vec![
-        PlatformAttemptResult::Unavailable,
-        PlatformAttemptResult::EmptySelection,
-        PlatformAttemptResult::Success("clipboard capture".into()),
-    ]);
+    let platform = StubPlatform::with_app_and_responses(
+        ActiveApp {
+            bundle_id: "org.example.fallback-isolation-linux".into(),
+            name: "Linux Test App".into(),
+        },
+        vec![
+            PlatformAttemptResult::Unavailable,
+            PlatformAttemptResult::EmptySelection,
+            PlatformAttemptResult::Success("clipboard capture".into()),
+        ],
+    );
     let store = StubStore;
     let cancel = NeverCancel;
     let adapter = NoAdapters;
