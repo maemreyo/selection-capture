@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Windows CI break caused by unconditional `core-graphics-types` dependency
 - `core-graphics-types` is now macOS-target-only; non-macOS builds use compile-safe CGRect/CGPoint/CGSize shims
 
+## [0.1.3] - 2026-03-30
+
 ### Added
 - Platform-neutral strategy model (`CaptureMethod::{AccessibilityPrimary, AccessibilityRange, ClipboardBorrow, SyntheticCopy}`)
 - `PlatformCapabilities` boundary type
@@ -88,4 +90,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [Unreleased]: https://github.com/maemreyo/selection-capture/compare/v0.1.4...HEAD
 [0.1.4]: https://github.com/maemreyo/selection-capture/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/maemreyo/selection-capture/compare/v0.1.2...v0.1.3
 [0.1.0]: https://github.com/maemreyo/selection-capture/releases/tag/v0.1.0
