@@ -6,7 +6,7 @@ use crate::macos_ax::{
     get_selected_text_by_ax, run_clipboard_borrow_script, ClipboardBorrowResult,
 };
 use crate::traits::{CapturePlatform, MonitorPlatform};
-use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
+use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult, WindowFrame};
 #[cfg(target_os = "macos")]
 use crate::AxObserverBridge;
 use accessibility_ng::{AXObserver, AXUIElement};
@@ -431,6 +431,16 @@ impl MacOSSelectionMonitor {
 impl CapturePlatform for MacOSPlatform {
     fn active_app(&self) -> Option<ActiveApp> {
         self.active_app_inner()
+    }
+
+    fn focused_window_frame(&self) -> Option<WindowFrame> {
+        let window = get_active_window().ok()?;
+        Some(WindowFrame::from_f64(
+            window.position.x,
+            window.position.y,
+            window.position.width,
+            window.position.height,
+        ))
     }
 
     fn attempt(&self, method: CaptureMethod, _app: Option<&ActiveApp>) -> PlatformAttemptResult {

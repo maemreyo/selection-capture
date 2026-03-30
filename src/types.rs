@@ -143,7 +143,27 @@ impl Default for CaptureTrace {
 pub struct CaptureSuccess {
     pub text: String,
     pub method: CaptureMethod,
+    pub focused_window_frame: Option<WindowFrame>,
     pub trace: Option<CaptureTrace>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WindowFrame {
+    pub x: i64,
+    pub y: i64,
+    pub width: i64,
+    pub height: i64,
+}
+
+impl WindowFrame {
+    pub fn from_f64(x: f64, y: f64, width: f64, height: f64) -> Self {
+        Self {
+            x: x.round() as i64,
+            y: y.round() as i64,
+            width: width.round() as i64,
+            height: height.round() as i64,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

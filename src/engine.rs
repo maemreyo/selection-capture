@@ -426,6 +426,7 @@ fn finish_success(
     CaptureOutcome::Success(CaptureSuccess {
         text,
         method,
+        focused_window_frame: platform.focused_window_frame(),
         trace,
     })
 }

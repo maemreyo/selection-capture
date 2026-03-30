@@ -335,6 +335,7 @@ fn capture_metrics_aggregates_latency_and_status_by_method() {
     let success_outcome = CaptureOutcome::Success(CaptureSuccess {
         text: "hello".to_string(),
         method: CaptureMethod::AccessibilityPrimary,
+        focused_window_frame: None,
         trace: Some(CaptureTrace {
             events: vec![
                 TraceEvent::MethodStarted(CaptureMethod::AccessibilityPrimary),

@@ -1,6 +1,7 @@
 use crate::profile::{AppProfile, AppProfileUpdate};
 use crate::types::{
-    ActiveApp, CaptureFailureContext, CaptureMethod, CleanupStatus, PlatformAttemptResult, UserHint,
+    ActiveApp, CaptureFailureContext, CaptureMethod, CleanupStatus, PlatformAttemptResult,
+    UserHint, WindowFrame,
 };
 
 pub trait CancelSignal {
@@ -20,6 +21,9 @@ pub trait AppAdapter: Send + Sync {
 
 pub trait CapturePlatform {
     fn active_app(&self) -> Option<ActiveApp>;
+    fn focused_window_frame(&self) -> Option<WindowFrame> {
+        None
+    }
     fn attempt(&self, method: CaptureMethod, app: Option<&ActiveApp>) -> PlatformAttemptResult;
     fn cleanup(&self) -> CleanupStatus;
 }
