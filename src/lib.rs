@@ -11,11 +11,15 @@ mod linux;
 #[cfg(feature = "linux-alpha")]
 mod linux_observer;
 #[cfg(feature = "linux-alpha")]
+mod linux_shell;
+#[cfg(feature = "linux-alpha")]
 mod linux_runtime_adapter;
 #[cfg(feature = "linux-alpha")]
 mod linux_subscriber;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+mod macos_ax;
 mod monitor;
 pub mod platform;
 mod profile;
