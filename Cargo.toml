@@ -45,7 +45,8 @@ rich-content = [
 ]
 
 [package.metadata.docs.rs]
-targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+default-target = "x86_64-unknown-linux-gnu"
+targets = ["x86_64-unknown-linux-gnu"]
 all-features = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
