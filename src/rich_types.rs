@@ -13,6 +13,11 @@ pub enum RichSource {
     AccessibilityAttributed,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RichConversion {
+    Markdown,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContentMetadata {
     pub active_app: Option<ActiveApp>,
@@ -27,6 +32,7 @@ pub struct RichPayload {
     pub plain_text: String,
     pub html: Option<String>,
     pub rtf: Option<String>,
+    pub markdown: Option<String>,
     pub metadata: ContentMetadata,
 }
 
@@ -55,6 +61,7 @@ pub struct CaptureRichOptions {
     pub prefer_rich: bool,
     pub allow_clipboard_rich: bool,
     pub allow_direct_accessibility_rich: bool,
+    pub conversion: Option<RichConversion>,
     pub max_rich_payload_bytes: usize,
     pub require_plain_text_match: bool,
 }
@@ -66,6 +73,7 @@ impl Default for CaptureRichOptions {
             prefer_rich: true,
             allow_clipboard_rich: true,
             allow_direct_accessibility_rich: true,
+            conversion: None,
             max_rich_payload_bytes: 256 * 1024,
             require_plain_text_match: true,
         }

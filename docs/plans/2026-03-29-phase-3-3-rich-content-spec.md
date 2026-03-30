@@ -2,7 +2,7 @@
 
 **Goal:** Add rich-content capture (RTF/HTML + metadata) without breaking the existing plain-text API.
 
-**Architecture:** Keep `capture()` unchanged and introduce additive rich APIs/types. Implement rich extraction as additive orchestration around the plain engine: direct accessibility rich path on macOS first, then clipboard rich extraction with strict consistency guards.
+**Architecture:** Keep `capture()` unchanged and introduce additive rich APIs/types. Implement rich extraction as additive orchestration around the plain engine: direct accessibility-rich path first, then clipboard rich extraction with strict consistency guards, then plain fallback.
 
 **Tech Stack:** Rust, existing `selection-capture` core engine, optional `clipboard-rs` (feature-gated), existing trace/monitoring types.
 
@@ -30,14 +30,16 @@ Reference input: `docs/plans/rich-content-research-verdict.md`.
 - Add new rich-capture API surface (additive only).
 - Rich extraction pipeline:
   - macOS direct selected-range RTF when available.
+  - Windows UIA and Linux AT-SPI direct-text baselines wrapped into minimal RTF.
   - Clipboard HTML/RTF fallback.
 - Metadata envelope for capture context.
 - Consistency guard to avoid returning stale clipboard rich payloads.
+- Optional Markdown normalization from rich/plain payloads.
 - Test coverage for fallback chain and consistency behavior.
 - Documentation for new API and behavior contract.
 
 ## 2.2 Out of Scope (defer)
-- In-process direct attributed-text extraction from Windows/Linux accessibility APIs.
+- Deep attributed runs on Windows/Linux beyond plain-text-wrapped RTF baselines.
 - Syntax highlighting and semantic code tokenization.
 - Persistent storage/indexing of captured rich payloads.
 - Plugin system and custom converters.
@@ -86,6 +88,7 @@ pub struct RichPayload {
     pub plain_text: String,
     pub html: Option<String>,
     pub rtf: Option<String>,
+    pub markdown: Option<String>,
     pub metadata: ContentMetadata,
 }
 
@@ -113,7 +116,8 @@ pub struct CaptureRichOptions {
     pub base: CaptureOptions,
     pub prefer_rich: bool,              // default: true
     pub allow_clipboard_rich: bool,     // default: true
-    pub allow_direct_accessibility_rich: bool, // default: true (macOS only)
+    pub allow_direct_accessibility_rich: bool, // default: true
+    pub conversion: Option<RichConversion>, // default: None
     pub max_rich_payload_bytes: usize,  // default: 262_144 (256 KiB)
     pub require_plain_text_match: bool, // default: true
 }
@@ -151,13 +155,16 @@ where
 1. Run existing plain-text engine (`capture` / `try_capture`) to obtain baseline plain text + method.
 2. If plain result is `Failure`, return `Failure` unchanged.
 3. If rich is disabled by options, return `CapturedContent::Plain`.
-4. On macOS, if enabled and method is accessibility-based, attempt direct selected-range RTF extraction.
+4. If enabled and method is accessibility-based, attempt direct platform rich extraction:
+   - macOS: AX selected-range RTF.
+   - Windows/Linux: direct accessibility text wrapped to minimal RTF baseline.
 5. If no direct rich payload is available, attempt clipboard rich read (`HTML`, then `RTF`) if enabled.
 6. Validate clipboard consistency:
    - Clipboard plain text must equal captured plain text (normalized compare), OR
    - hash match if exact compare disabled in future.
-7. If valid rich format found, return `CapturedContent::Rich`.
-8. Else return `CapturedContent::Plain`.
+7. If valid rich format found, optionally run conversion pipeline (Markdown normalization).
+8. If valid rich format found, return `CapturedContent::Rich`.
+9. Else return `CapturedContent::Plain`.
 
 ## 5.2 Consistency Guard (Required)
 
@@ -185,7 +192,7 @@ Normalization for comparison (v1):
 - `src/rich_types.rs`
 - `src/rich_engine.rs`
 - `src/rich_clipboard.rs`
-- `tests/rich_capture.rs`
+- `src/rich_convert.rs`
 
 ## 6.2 Modified Files
 - `src/lib.rs` (exports + feature-gated API)
@@ -213,12 +220,14 @@ Normalization for comparison (v1):
 
 ## 8. Test Specification
 
-## 8.1 Unit Tests (`tests/rich_capture.rs`)
+## 8.1 Unit Tests (`src/rich_engine.rs`, `src/rich_convert.rs`)
 - Returns `Rich` when clipboard HTML exists and plain-text match passes.
 - Returns `Rich` when only RTF exists and plain-text match passes.
 - Returns `Plain` when clipboard formats exist but plain-text mismatch.
 - Returns `Plain` when rich payload exceeds max size.
 - Returns `Plain` when rich disabled in options.
+- Uses direct-rich path first when available, then clipboard fallback.
+- Produces normalized markdown when conversion is enabled.
 - Preserves baseline `Failure` unchanged.
 - `try_capture_rich` mirrors `WouldBlock` behavior from baseline engine.
 
@@ -274,8 +283,8 @@ Normalization for comparison (v1):
 - Risk: payload size/memory spikes
   - Mitigation: configurable payload cap and hard fallback.
 
-- Risk: API bloat before direct AX exists
-  - Mitigation: keep rich API minimal and additive; avoid introducing converters in v1.
+- Risk: cross-platform direct-rich parity quality differs
+  - Mitigation: preserve plain-text baseline semantics and clearly label source in metadata.
 
 ---
 
@@ -283,7 +292,7 @@ Normalization for comparison (v1):
 
 - New additive API compiles behind `rich-content` feature.
 - Existing API remains source-compatible and behaviorally unchanged.
-- Clipboard-first rich capture works with consistency guard.
+- Direct-first rich capture path works where available, with clipboard consistency guard fallback.
 - All existing CI checks pass.
 - New rich tests pass with deterministic stubs.
 - Documentation explains contracts and fallbacks clearly.
@@ -292,13 +301,8 @@ Normalization for comparison (v1):
 
 ## 13. Next Phase Hooks (Post-3.3 initial)
 
-- Add direct attributed extraction adapters per platform:
-  - macOS `NSAttributedString`
-  - Windows UIA `TextPattern` attributes
-  - Linux AT-SPI text attributes
-- Introduce source-priority policy:
-  - Direct accessibility rich > clipboard rich > plain
-- Optional converters:
-  - RTF/HTML -> Markdown
+- Improve Windows/Linux direct-rich quality beyond plain-text-wrapped RTF baselines.
+- Add richer HTML-to-Markdown semantics (links/lists/code blocks/tables).
+- Add configurable source-priority policies for app-specific preferences.
 
 ---

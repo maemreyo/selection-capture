@@ -1,13 +1,18 @@
 use crate::engine::{capture, try_capture};
+#[cfg(all(feature = "linux-alpha", target_os = "linux"))]
+use crate::linux::try_selected_rtf_by_atspi;
 #[cfg(target_os = "macos")]
 use crate::macos::try_selected_rtf_by_ax;
 use crate::rich_clipboard::{RichClipboardPayload, RichClipboardReader, SystemRichClipboardReader};
+use crate::rich_convert::convert_to_markdown;
 use crate::rich_types::{
     CaptureRichOptions, CaptureRichOutcome, CaptureRichSuccess, CapturedContent, ContentMetadata,
-    RichPayload, RichSource,
+    RichConversion, RichPayload, RichSource,
 };
 use crate::traits::{AppAdapter, AppProfileStore, CancelSignal, CapturePlatform};
 use crate::types::{ActiveApp, CaptureOutcome, CaptureTrace, TraceEvent, WouldBlock};
+#[cfg(all(feature = "windows-beta", target_os = "windows"))]
+use crate::windows::try_selected_rtf_by_uia;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -120,6 +125,12 @@ fn enrich_capture_outcome(
             if options.allow_direct_accessibility_rich && success.method.is_ax() {
                 if let Some(rtf) = direct_rtf_reader() {
                     if rtf.len() <= options.max_rich_payload_bytes {
+                        let markdown = maybe_convert_to_markdown(
+                            options,
+                            None,
+                            Some(rtf.as_str()),
+                            &plain_text,
+                        );
                         let metadata = ContentMetadata {
                             active_app: detect_active_app(success.trace.as_ref())
                                 .or_else(|| platform.active_app()),
@@ -134,6 +145,7 @@ fn enrich_capture_outcome(
                                 plain_text: plain_text.clone(),
                                 html: None,
                                 rtf: Some(rtf),
+                                markdown,
                                 metadata,
                             }),
                             method: success.method,
@@ -198,10 +210,16 @@ fn enrich_capture_outcome(
                 plain_text_hash: hash_text(&plain_text),
             };
 
+            let html = payload.html;
+            let rtf = payload.rtf;
+            let markdown =
+                maybe_convert_to_markdown(options, html.as_deref(), rtf.as_deref(), &plain_text);
+
             let rich_payload = RichPayload {
                 plain_text: plain_text.clone(),
-                html: payload.html,
-                rtf: payload.rtf,
+                html,
+                rtf,
+                markdown,
                 metadata,
             };
 
@@ -214,14 +232,39 @@ fn enrich_capture_outcome(
     }
 }
 
+#[cfg(target_os = "macos")]
 fn read_direct_rtf_for_current_selection() -> Option<String> {
-    #[cfg(target_os = "macos")]
-    {
-        try_selected_rtf_by_ax()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        None
+    try_selected_rtf_by_ax()
+}
+
+#[cfg(all(feature = "windows-beta", target_os = "windows"))]
+fn read_direct_rtf_for_current_selection() -> Option<String> {
+    try_selected_rtf_by_uia()
+}
+
+#[cfg(all(feature = "linux-alpha", target_os = "linux"))]
+fn read_direct_rtf_for_current_selection() -> Option<String> {
+    try_selected_rtf_by_atspi()
+}
+
+#[cfg(not(any(
+    target_os = "macos",
+    all(feature = "windows-beta", target_os = "windows"),
+    all(feature = "linux-alpha", target_os = "linux")
+)))]
+fn read_direct_rtf_for_current_selection() -> Option<String> {
+    None
+}
+
+fn maybe_convert_to_markdown(
+    options: &CaptureRichOptions,
+    html: Option<&str>,
+    rtf: Option<&str>,
+    plain_text: &str,
+) -> Option<String> {
+    match options.conversion {
+        Some(RichConversion::Markdown) => convert_to_markdown(html, rtf, plain_text),
+        None => None,
     }
 }
 
@@ -449,6 +492,48 @@ mod tests {
                 CapturedContent::Rich(payload) => {
                     assert_eq!(payload.rtf.as_deref(), Some("{\\rtf1 hello}"));
                     assert_eq!(payload.metadata.source, RichSource::ClipboardRtf);
+                }
+                CapturedContent::Plain(_) => panic!("expected rich content"),
+            },
+            CaptureRichOutcome::Failure(_) => panic!("expected success"),
+        }
+    }
+
+    #[test]
+    fn populates_markdown_when_conversion_is_enabled() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.rich".to_string(),
+                name: "Rich App".to_string(),
+            }),
+            responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                "hello world".to_string(),
+            )])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let reader = StubReader {
+            payload: Some(RichClipboardPayload {
+                plain_text: Some("hello world".to_string()),
+                html: Some("<p>hello<br>world</p>".to_string()),
+                rtf: None,
+            }),
+        };
+        let mut options = rich_options();
+        options.conversion = Some(RichConversion::Markdown);
+
+        let out = capture_rich_with_reader(
+            &platform,
+            &StubStore,
+            &NeverCancel,
+            &[&NoAdapters],
+            &options,
+            &reader,
+        );
+
+        match out {
+            CaptureRichOutcome::Success(success) => match success.content {
+                CapturedContent::Rich(payload) => {
+                    assert_eq!(payload.markdown.as_deref(), Some("hello\nworld"));
                 }
                 CapturedContent::Plain(_) => panic!("expected rich content"),
             },

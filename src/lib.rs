@@ -20,6 +20,8 @@ mod profile;
 #[cfg(feature = "rich-content")]
 mod rich_clipboard;
 #[cfg(feature = "rich-content")]
+mod rich_convert;
+#[cfg(feature = "rich-content")]
 mod rich_engine;
 #[cfg(feature = "rich-content")]
 mod rich_types;
@@ -77,7 +79,7 @@ pub use rich_engine::{capture_rich, try_capture_rich};
 #[cfg(feature = "rich-content")]
 pub use rich_types::{
     CaptureRichOptions, CaptureRichOutcome, CaptureRichSuccess, CapturedContent, ContentMetadata,
-    RichFormat, RichPayload, RichSource,
+    RichConversion, RichFormat, RichPayload, RichSource,
 };
 pub use traits::{AppAdapter, AppProfileStore, CancelSignal, CapturePlatform, MonitorPlatform};
 pub use types::{

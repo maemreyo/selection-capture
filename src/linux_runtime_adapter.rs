@@ -443,20 +443,17 @@ pub fn install_default_linux_runtime_adapter_if_absent() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::linux_observer::linux_observer_test_lock;
     use crate::{
         ensure_linux_native_subscriber_hook_installed, linux_native_subscriber_stats,
         LinuxObserverBridge,
     };
-    use std::sync::{Mutex, OnceLock};
-
-    fn test_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     #[test]
     fn installing_default_adapter_enables_lifecycle_attempt_tracking() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = linux_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         let _ = LinuxObserverBridge::stop();
         LinuxObserverBridge::set_lifecycle_hook(None);
         reset_linux_default_runtime_adapter_state();
@@ -477,7 +474,9 @@ mod tests {
 
     #[test]
     fn default_adapter_state_tracks_attach_detach_idempotently() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = linux_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         reset_linux_default_runtime_adapter_state();
         assert_eq!(
             linux_default_runtime_adapter_state(),
@@ -514,7 +513,9 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn listener_restart_updates_telemetry_after_forced_kill() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = linux_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         let _ = LinuxObserverBridge::stop();
         LinuxObserverBridge::set_lifecycle_hook(None);
         reset_linux_default_runtime_adapter_state();

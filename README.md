@@ -222,12 +222,16 @@ then optionally attaching clipboard rich payloads.
 
 - Rich payload sources (current):
   - macOS direct AX RTF (`AXRTFForRange`) when capture method is accessibility-based
+  - Windows direct UIA text wrapped to minimal RTF when capture method is accessibility-based (`windows-beta`)
+  - Linux direct AT-SPI text wrapped to minimal RTF when capture method is accessibility-based (`linux-alpha`)
   - Clipboard HTML/RTF fallback
 - Guardrail: rich payload is accepted only when clipboard plain text matches captured plain text
 - Fallback: if guard fails (or payload unavailable/oversized), result degrades to plain content
 
 `CaptureRichOptions::allow_direct_accessibility_rich` controls the direct AX path and defaults to
-`true` (macOS only).
+`true`.
+`CaptureRichOptions::conversion = Some(RichConversion::Markdown)` enables markdown normalization and
+populates `RichPayload.markdown`.
 
 ```rust
 #[cfg(feature = "rich-content")]

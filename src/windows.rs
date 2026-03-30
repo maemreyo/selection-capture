@@ -1,3 +1,5 @@
+#[cfg(all(feature = "rich-content", target_os = "windows"))]
+use crate::rich_convert::plain_text_to_minimal_rtf;
 use crate::traits::{CapturePlatform, MonitorPlatform};
 use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
 use crate::windows_observer::{
@@ -446,6 +448,17 @@ if ($null -ne $valuePattern) {
 
     let stdout = String::from_utf8(output.stdout).map_err(|err| err.to_string())?;
     Ok(normalize_windows_text_stdout(&stdout))
+}
+
+#[cfg(all(feature = "rich-content", target_os = "windows"))]
+pub(crate) fn try_selected_rtf_by_uia() -> Option<String> {
+    let text = read_uia_text().ok().flatten()?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(plain_text_to_minimal_rtf(trimmed))
+    }
 }
 
 pub(crate) fn windows_default_runtime_event_source() -> Option<String> {

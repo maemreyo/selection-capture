@@ -3,6 +3,8 @@ use crate::linux_observer::{
 };
 use crate::linux_runtime_adapter::install_default_linux_runtime_adapter_if_absent;
 use crate::linux_subscriber::ensure_linux_native_subscriber_hook_installed;
+#[cfg(all(feature = "rich-content", target_os = "linux"))]
+use crate::rich_convert::plain_text_to_minimal_rtf;
 use crate::traits::{CapturePlatform, MonitorPlatform};
 use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
 use std::collections::VecDeque;
@@ -734,6 +736,17 @@ pub(crate) fn linux_default_runtime_event_source() -> Option<String> {
     }
 }
 
+#[cfg(all(feature = "rich-content", target_os = "linux"))]
+pub(crate) fn try_selected_rtf_by_atspi() -> Option<String> {
+    let text = read_atspi_text().ok().flatten()?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(plain_text_to_minimal_rtf(trimmed))
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn read_active_app() -> Result<Option<ActiveApp>, String> {
     let pid = read_active_window_pid()?;
@@ -811,14 +824,9 @@ fn read_process_exe_path(pid: u32) -> Result<Option<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::linux_observer::linux_observer_test_lock;
     use crate::linux_subscriber::linux_native_subscriber_stats;
     use crate::LinuxObserverBridge;
-    use std::sync::{Mutex, OnceLock};
-
-    fn test_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     #[derive(Debug)]
     struct StubBackend {
@@ -870,7 +878,9 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_preferred_uses_event_pump_when_available() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = linux_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         fn pump() -> Vec<String> {
             vec![
                 "  native a ".to_string(),
@@ -898,7 +908,9 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_preferred_uses_bridge_drain_by_default() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = linux_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         let _ = LinuxObserverBridge::stop();
         let _ = LinuxObserverBridge::start();
         assert!(LinuxObserverBridge::is_active());
@@ -926,7 +938,9 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_preferred_releases_bridge_on_drop() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = linux_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         let _ = LinuxObserverBridge::stop();
 
         {
@@ -944,7 +958,9 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_preferred_transitions_subscriber_manager_lifecycle() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = linux_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         let _ = LinuxObserverBridge::stop();
         let before = linux_native_subscriber_stats();
 
@@ -966,7 +982,9 @@ mod tests {
 
     #[test]
     fn selection_monitor_native_preferred_applies_queue_capacity() {
-        let _guard = test_lock().lock().expect("test lock poisoned");
+        let _guard = linux_observer_test_lock()
+            .lock()
+            .expect("test lock poisoned");
         let monitor = LinuxSelectionMonitor::new_with_options(LinuxSelectionMonitorOptions {
             poll_interval: Duration::from_millis(10),
             backend: LinuxMonitorBackend::NativeEventPreferred,
