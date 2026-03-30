@@ -47,37 +47,12 @@ pub(crate) fn plain_text_to_minimal_rtf(text: &str) -> String {
 }
 
 fn rtf_to_markdown(input: &str) -> Option<String> {
-    let primary = rtf_to_markdown_from_bytes(input.as_bytes())?;
-    let normalized_primary = normalize_plain_text(&primary);
-    if input.contains(r"\par") && !normalized_primary.contains('\n') {
-        let rewritten = rewrite_rtf_par_to_line(input);
-        if rewritten != input {
-            if let Some(retried) = rtf_to_markdown_from_bytes(rewritten.as_bytes()) {
-                let normalized_retried = normalize_plain_text(&retried);
-                if normalized_retried != normalized_primary {
-                    return Some(normalized_retried);
-                }
-            }
-            if let Ok(retried_plain) = rtf_to_html::rtf_to_plain_text(rewritten.as_bytes()) {
-                let normalized_plain = normalize_plain_text(&retried_plain);
-                if !normalized_plain.is_empty() && normalized_plain != normalized_primary {
-                    return Some(normalized_plain);
-                }
-            }
-            let marker = "__PAR__";
-            let marked = inject_marker_after_par_control(input, marker);
-            if let Ok(marked_plain) = rtf_to_html::rtf_to_plain_text(marked.as_bytes()) {
-                if marked_plain.contains(marker) {
-                    let normalized_marked =
-                        normalize_plain_text(&marked_plain.replace(marker, "\n"));
-                    if !normalized_marked.is_empty() && normalized_marked != normalized_primary {
-                        return Some(normalized_marked);
-                    }
-                }
-            }
-        }
+    let primary = normalize_plain_text(&rtf_to_markdown_from_bytes(input.as_bytes())?);
+    if !input.contains(r"\par") || primary.contains('\n') {
+        return Some(primary);
     }
-    Some(normalized_primary)
+
+    recover_paragraph_breaks_with_marker(input).or(Some(primary))
 }
 
 fn rtf_to_markdown_from_bytes(input: &[u8]) -> Option<String> {
@@ -85,29 +60,24 @@ fn rtf_to_markdown_from_bytes(input: &[u8]) -> Option<String> {
     Some(quick_html2md::html_to_markdown(&html))
 }
 
-fn rewrite_rtf_par_to_line(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let bytes = input.as_bytes();
-    let mut i = 0;
-
-    while i < bytes.len() {
-        if bytes[i] == b'\\'
-            && i + 3 < bytes.len()
-            && bytes[i + 1] == b'p'
-            && bytes[i + 2] == b'a'
-            && bytes[i + 3] == b'r'
-            && (i + 4 == bytes.len() || !bytes[i + 4].is_ascii_alphabetic())
-        {
-            out.push_str(r"\line");
-            i += 4;
-            continue;
-        }
-
-        out.push(bytes[i] as char);
-        i += 1;
+fn recover_paragraph_breaks_with_marker(input: &str) -> Option<String> {
+    let marker = "__SELECTION_CAPTURE_PAR_BREAK__";
+    let marked = inject_marker_after_par_control(input, marker);
+    if marked == input {
+        return None;
     }
 
-    out
+    let plain = rtf_to_html::rtf_to_plain_text(marked.as_bytes()).ok()?;
+    if !plain.contains(marker) {
+        return None;
+    }
+
+    let normalized = normalize_plain_text(&plain.replace(marker, "\n"));
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
 }
 
 fn inject_marker_after_par_control(input: &str, marker: &str) -> String {
@@ -173,12 +143,6 @@ mod tests {
     }
 
     #[test]
-    fn rewrites_par_without_touching_pard_or_partightenfactor() {
-        let rewritten = rewrite_rtf_par_to_line(r"{\rtf1\ansi \pard\partightenfactor0 A\par B}");
-        assert_eq!(rewritten, r"{\rtf1\ansi \pard\partightenfactor0 A\line B}");
-    }
-
-    #[test]
     fn injects_marker_only_for_par_control_word() {
         let marked = inject_marker_after_par_control(
             r"{\rtf1\ansi \pard\partightenfactor0 A\par B}",
@@ -205,13 +169,8 @@ mod tests {
         let primary = normalize_plain_text(
             &rtf_to_markdown_from_bytes(input.as_bytes()).expect("primary markdown"),
         );
-        let marker = "__PAR__";
-        let marked = inject_marker_after_par_control(input, marker);
-        let marked_plain = normalize_plain_text(
-            &rtf_to_html::rtf_to_plain_text(marked.as_bytes())
-                .expect("marked plain")
-                .replace(marker, "\n"),
-        );
+        let marked_plain =
+            recover_paragraph_breaks_with_marker(input).expect("marker recovery should work");
         assert_eq!(primary, "HelloWorld");
         assert_eq!(marked_plain, "Hello\nWorld");
     }
