@@ -38,7 +38,11 @@ default = []
 windows-beta = ["dep:windows"]
 linux-alpha = ["dep:atspi"]
 async = ["dep:tokio"]
-rich-content = ["dep:clipboard-rs", "dep:quick_html2md", "dep:rtf-to-html"]
+rich-content = [
+    "dep:clipboard-rs",
+    "dep:quick_html2md",
+    "dep:rtf-to-html",
+]
 
 [package.metadata.docs.rs]
 targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
