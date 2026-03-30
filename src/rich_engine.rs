@@ -416,6 +416,18 @@ mod tests {
         }
     }
 
+    fn fixture_word_rtf() -> &'static str {
+        include_str!("../tests/fixtures/rich/word-style-paragraphs.rtf")
+    }
+
+    fn fixture_outlook_rtf() -> &'static str {
+        include_str!("../tests/fixtures/rich/outlook-style-bullets.rtf")
+    }
+
+    fn fixture_word_markdown() -> &'static str {
+        "Hello,\nThis is a Word exported paragraph.\nRegards,\nTeam"
+    }
+
     #[test]
     fn returns_rich_when_html_matches_plain_text() {
         let platform = StubPlatform {
@@ -542,6 +554,93 @@ mod tests {
     }
 
     #[test]
+    fn populates_markdown_from_real_word_rtf_fixture() {
+        let expected = fixture_word_markdown().to_string();
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.rich".to_string(),
+                name: "Rich App".to_string(),
+            }),
+            responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                expected.clone(),
+            )])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let reader = StubReader {
+            payload: Some(RichClipboardPayload {
+                plain_text: Some(expected),
+                html: None,
+                rtf: Some(fixture_word_rtf().to_string()),
+            }),
+        };
+        let mut options = rich_options();
+        options.conversion = Some(RichConversion::Markdown);
+
+        let out = capture_rich_with_reader(
+            &platform,
+            &StubStore,
+            &NeverCancel,
+            &[&NoAdapters],
+            &options,
+            &reader,
+        );
+
+        match out {
+            CaptureRichOutcome::Success(success) => match success.content {
+                CapturedContent::Rich(payload) => {
+                    assert_eq!(payload.metadata.source, RichSource::ClipboardRtf);
+                    assert_eq!(payload.markdown.as_deref(), Some(fixture_word_markdown()));
+                }
+                CapturedContent::Plain(_) => panic!("expected rich content"),
+            },
+            CaptureRichOutcome::Failure(_) => panic!("expected success"),
+        }
+    }
+
+    #[test]
+    fn prefers_html_source_when_html_and_real_rtf_are_both_present() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.rich".to_string(),
+                name: "Rich App".to_string(),
+            }),
+            responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                "HTML preferred".to_string(),
+            )])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let reader = StubReader {
+            payload: Some(RichClipboardPayload {
+                plain_text: Some("HTML preferred".to_string()),
+                html: Some("<p>HTML preferred</p>".to_string()),
+                rtf: Some(fixture_outlook_rtf().to_string()),
+            }),
+        };
+        let mut options = rich_options();
+        options.conversion = Some(RichConversion::Markdown);
+
+        let out = capture_rich_with_reader(
+            &platform,
+            &StubStore,
+            &NeverCancel,
+            &[&NoAdapters],
+            &options,
+            &reader,
+        );
+
+        match out {
+            CaptureRichOutcome::Success(success) => match success.content {
+                CapturedContent::Rich(payload) => {
+                    assert_eq!(payload.metadata.source, RichSource::ClipboardHtml);
+                    assert_eq!(payload.markdown.as_deref(), Some("HTML preferred"));
+                }
+                CapturedContent::Plain(_) => panic!("expected rich content"),
+            },
+            CaptureRichOutcome::Failure(_) => panic!("expected success"),
+        }
+    }
+
+    #[test]
     fn returns_plain_when_clipboard_plain_text_mismatches() {
         let platform = StubPlatform {
             app: Some(ActiveApp {
@@ -574,6 +673,50 @@ mod tests {
             CaptureRichOutcome::Success(success) => match success.content {
                 CapturedContent::Plain(text) => assert_eq!(text, "hello"),
                 CapturedContent::Rich(_) => panic!("expected plain content"),
+            },
+            CaptureRichOutcome::Failure(_) => panic!("expected success"),
+        }
+    }
+
+    #[test]
+    fn allows_real_rtf_when_plain_text_match_is_disabled() {
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.rich".to_string(),
+                name: "Rich App".to_string(),
+            }),
+            responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                fixture_word_markdown().to_string(),
+            )])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let reader = StubReader {
+            payload: Some(RichClipboardPayload {
+                plain_text: Some("mismatch plain text".to_string()),
+                html: None,
+                rtf: Some(fixture_word_rtf().to_string()),
+            }),
+        };
+        let mut options = rich_options();
+        options.require_plain_text_match = false;
+        options.conversion = Some(RichConversion::Markdown);
+
+        let out = capture_rich_with_reader(
+            &platform,
+            &StubStore,
+            &NeverCancel,
+            &[&NoAdapters],
+            &options,
+            &reader,
+        );
+
+        match out {
+            CaptureRichOutcome::Success(success) => match success.content {
+                CapturedContent::Rich(payload) => {
+                    assert_eq!(payload.metadata.source, RichSource::ClipboardRtf);
+                    assert_eq!(payload.markdown.as_deref(), Some(fixture_word_markdown()));
+                }
+                CapturedContent::Plain(_) => panic!("expected rich content"),
             },
             CaptureRichOutcome::Failure(_) => panic!("expected success"),
         }
@@ -614,6 +757,92 @@ mod tests {
             CaptureRichOutcome::Success(success) => match success.content {
                 CapturedContent::Plain(text) => assert_eq!(text, "hello"),
                 CapturedContent::Rich(_) => panic!("expected plain content"),
+            },
+            CaptureRichOutcome::Failure(_) => panic!("expected success"),
+        }
+    }
+
+    #[test]
+    fn returns_plain_when_real_rtf_fixture_exceeds_size_limit() {
+        let expected = fixture_word_markdown().to_string();
+        let rtf = fixture_word_rtf().to_string();
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.rich".to_string(),
+                name: "Rich App".to_string(),
+            }),
+            responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                expected.clone(),
+            )])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let reader = StubReader {
+            payload: Some(RichClipboardPayload {
+                plain_text: Some(expected.clone()),
+                html: None,
+                rtf: Some(rtf.clone()),
+            }),
+        };
+        let mut options = rich_options();
+        options.max_rich_payload_bytes = rtf.len().saturating_sub(1);
+
+        let out = capture_rich_with_reader(
+            &platform,
+            &StubStore,
+            &NeverCancel,
+            &[&NoAdapters],
+            &options,
+            &reader,
+        );
+
+        match out {
+            CaptureRichOutcome::Success(success) => match success.content {
+                CapturedContent::Plain(text) => assert_eq!(text, expected),
+                CapturedContent::Rich(_) => panic!("expected plain content"),
+            },
+            CaptureRichOutcome::Failure(_) => panic!("expected success"),
+        }
+    }
+
+    #[test]
+    fn plain_text_match_accepts_crlf_vs_lf_with_real_rtf_payload() {
+        let expected = fixture_word_markdown().to_string();
+        let platform = StubPlatform {
+            app: Some(ActiveApp {
+                bundle_id: "app.rich".to_string(),
+                name: "Rich App".to_string(),
+            }),
+            responses: Arc::new(Mutex::new(vec![PlatformAttemptResult::Success(
+                expected.clone(),
+            )])),
+            cleanup: CleanupStatus::Clean,
+        };
+        let reader = StubReader {
+            payload: Some(RichClipboardPayload {
+                plain_text: Some(expected.replace('\n', "\r\n") + "\r\n"),
+                html: None,
+                rtf: Some(fixture_word_rtf().to_string()),
+            }),
+        };
+        let mut options = rich_options();
+        options.conversion = Some(RichConversion::Markdown);
+
+        let out = capture_rich_with_reader(
+            &platform,
+            &StubStore,
+            &NeverCancel,
+            &[&NoAdapters],
+            &options,
+            &reader,
+        );
+
+        match out {
+            CaptureRichOutcome::Success(success) => match success.content {
+                CapturedContent::Rich(payload) => {
+                    assert_eq!(payload.metadata.source, RichSource::ClipboardRtf);
+                    assert_eq!(payload.markdown.as_deref(), Some(fixture_word_markdown()));
+                }
+                CapturedContent::Plain(_) => panic!("expected rich content"),
             },
             CaptureRichOutcome::Failure(_) => panic!("expected success"),
         }

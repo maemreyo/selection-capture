@@ -198,6 +198,37 @@ mod tests {
     }
 
     #[test]
+    fn converts_word_style_rtf_fixture_with_crlf_line_endings() {
+        let input = include_str!("../tests/fixtures/rich/word-style-paragraphs.rtf");
+        let crlf_input = input.replace('\n', "\r\n");
+        let markdown = convert_to_markdown(None, Some(&crlf_input), "")
+            .expect("markdown should be present for crlf input");
+        assert_eq!(
+            markdown,
+            "Hello,\nThis is a Word exported paragraph.\nRegards,\nTeam"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_rtf_when_html_is_present_but_empty() {
+        let rtf = include_str!("../tests/fixtures/rich/word-style-paragraphs.rtf");
+        let markdown = convert_to_markdown(Some(""), Some(rtf), "")
+            .expect("rtf should be used when html conversion is empty");
+        assert_eq!(
+            markdown,
+            "Hello,\nThis is a Word exported paragraph.\nRegards,\nTeam"
+        );
+    }
+
+    #[test]
+    fn prefers_html_when_html_and_rtf_both_have_content() {
+        let rtf = include_str!("../tests/fixtures/rich/outlook-style-bullets.rtf");
+        let markdown = convert_to_markdown(Some("<p>HTML wins</p>"), Some(rtf), "")
+            .expect("html should win when non-empty");
+        assert_eq!(markdown, "HTML wins");
+    }
+
+    #[test]
     fn wraps_plain_text_as_minimal_rtf() {
         let rtf = plain_text_to_minimal_rtf("a{b}\\c\nd");
         assert!(rtf.starts_with("{\\rtf1\\ansi "));
