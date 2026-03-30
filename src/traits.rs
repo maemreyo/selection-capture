@@ -1,8 +1,8 @@
 use crate::profile::{AppProfile, AppProfileUpdate};
 use crate::types::{
-    ActiveApp, CaptureFailureContext, CaptureMethod, CleanupStatus, PlatformAttemptResult, UserHint,
+    ActiveApp, CGRect, CaptureFailureContext, CaptureMethod, CleanupStatus, PlatformAttemptResult,
+    UserHint,
 };
-use core_graphics_types::geometry::CGRect;
 
 pub trait CancelSignal {
     fn is_cancelled(&self) -> bool;

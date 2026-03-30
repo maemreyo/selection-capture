@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-03-30
+
+### Added
+- `CaptureSuccess.focused_window_frame: Option<CGRect>` for focused-window-aware consumers
+- macOS AX frame extraction via `AXFocusedWindow` + `AXPosition` + `AXSize`
+
+### Changed
+- `CapturePlatform::focused_window_frame()` now uses crate-level `CGRect` type
+- README and development docs now describe focused-window frame output
+
+### Fixed
+- Windows CI break caused by unconditional `core-graphics-types` dependency
+- `core-graphics-types` is now macOS-target-only; non-macOS builds use compile-safe CGRect/CGPoint/CGSize shims
+
 ### Added
 - Platform-neutral strategy model (`CaptureMethod::{AccessibilityPrimary, AccessibilityRange, ClipboardBorrow, SyntheticCopy}`)
 - `PlatformCapabilities` boundary type
@@ -72,5 +86,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Publish-ready metadata (`repository`, `documentation`, keywords/categories)
 - Basic README, MIT license, CI workflow scaffold
 
-[Unreleased]: https://github.com/maemreyo/selection-capture/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/maemreyo/selection-capture/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/maemreyo/selection-capture/compare/v0.1.3...v0.1.4
 [0.1.0]: https://github.com/maemreyo/selection-capture/releases/tag/v0.1.0

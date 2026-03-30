@@ -1,6 +1,29 @@
 use crate::profile::TriState;
-use core_graphics_types::geometry::CGRect;
 use std::time::Duration;
+
+#[cfg(target_os = "macos")]
+pub use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
+
+#[cfg(not(target_os = "macos"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CGPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[cfg(not(target_os = "macos"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CGSize {
+    pub width: f64,
+    pub height: f64,
+}
+
+#[cfg(not(target_os = "macos"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CGRect {
+    pub origin: CGPoint,
+    pub size: CGSize,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActiveApp {

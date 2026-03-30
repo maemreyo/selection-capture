@@ -89,9 +89,9 @@ pub use rich_types::{
 };
 pub use traits::{AppAdapter, AppProfileStore, CancelSignal, CapturePlatform, MonitorPlatform};
 pub use types::{
-    ActiveApp, CaptureFailure, CaptureFailureContext, CaptureMethod, CaptureOptions,
-    CaptureOutcome, CaptureStatus, CaptureSuccess, CaptureTrace, CleanupStatus, FailureKind,
-    PlatformAttemptResult, RetryPolicy, TraceEvent, UserHint, WouldBlock,
+    ActiveApp, CGPoint, CGRect, CGSize, CaptureFailure, CaptureFailureContext, CaptureMethod,
+    CaptureOptions, CaptureOutcome, CaptureStatus, CaptureSuccess, CaptureTrace, CleanupStatus,
+    FailureKind, PlatformAttemptResult, RetryPolicy, TraceEvent, UserHint, WouldBlock,
 };
 #[cfg(feature = "windows-beta")]
 pub use windows::{

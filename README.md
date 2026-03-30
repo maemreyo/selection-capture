@@ -106,7 +106,10 @@ fn main() {
     let options = CaptureOptions::default();
 
     match capture(&platform, &store, &cancel, &adapters, &options) {
-        CaptureOutcome::Success(ok) => println!("Selected text: {}", ok.text),
+        CaptureOutcome::Success(ok) => {
+            println!("Selected text: {}", ok.text);
+            println!("Focused window frame: {:?}", ok.focused_window_frame);
+        }
         CaptureOutcome::Failure(err) => eprintln!("Capture failed: {:?}", err.status),
     }
 }
@@ -217,6 +220,7 @@ Current limitations:
 - `CaptureStatus` - Detailed status codes for deterministic UX mapping
 - `FailureKind` - Categorization of failure modes
 - `CaptureTrace` - Complete trace of all attempts made
+- `CaptureSuccess.focused_window_frame` - Focused window bounds (`Option<CGRect>`) for monitor-aware consumers
 
 ### Rich Content Capture (`rich-content` feature)
 

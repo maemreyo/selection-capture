@@ -221,7 +221,8 @@ pub use windows::WindowsPlatform;
 The macOS implementation uses:
 
 - **Accessibility APIs** (`accessibility-ng`, `accessibility-sys-ng`)
-- **Active window detection** (`active-win-pos-rs`)
+- **Focused window frame via AX** (`AXFocusedWindow` + `AXPosition` + `AXSize` → `CGRect`)
+- **Active app detection** (`active-win-pos-rs`)
 - **Core Foundation** (`core-foundation`)
 
 #### Debugging Accessibility Issues

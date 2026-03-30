@@ -1,6 +1,6 @@
 # llms.txt
 project: selection-capture
-version: 0.1.3
+version: 0.1.4
 repo: https://github.com/maemreyo/selection-capture
 docs: https://docs.rs/selection-capture
 crate: https://crates.io/crates/selection-capture

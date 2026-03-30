@@ -11,7 +11,7 @@
 ## 1. Context and Problem Statement
 
 Current output is plain text only:
-- `CaptureSuccess { text: String, method, trace }`
+- `CaptureSuccess { text: String, method, focused_window_frame: Option<CGRect>, trace }`
 - `PlatformAttemptResult::Success(String)`
 
 This is stable and should not be broken.  

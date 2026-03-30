@@ -1,3 +1,4 @@
+use crate::types::{CGPoint, CGRect, CGSize};
 use accessibility_ng::{AXAttribute, AXUIElement, AXValue};
 #[cfg(feature = "rich-content")]
 use accessibility_sys_ng::kAXRTFForRangeParameterizedAttribute;
@@ -10,7 +11,6 @@ use core_foundation::base::CFType;
 #[cfg(feature = "rich-content")]
 use core_foundation::data::CFData;
 use core_foundation::string::CFString;
-use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
 #[cfg(feature = "rich-content")]
 use macos_accessibility_client::accessibility::application_is_trusted;
 use std::process::Command;

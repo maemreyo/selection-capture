@@ -10,7 +10,7 @@ Machine-oriented operating guide for AI agents working with this repository.
 
 ## Project Snapshot
 - Crate: `selection-capture`
-- Version: `0.1.3`
+- Version: `0.1.4`
 - Rust edition: `2021`
 - Rust version: `1.75`
 - Default docs.rs target: `x86_64-unknown-linux-gnu`

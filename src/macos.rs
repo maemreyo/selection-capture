@@ -7,7 +7,7 @@ use crate::macos_ax::{
     ClipboardBorrowResult,
 };
 use crate::traits::{CapturePlatform, MonitorPlatform};
-use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
+use crate::types::{ActiveApp, CGRect, CaptureMethod, CleanupStatus, PlatformAttemptResult};
 #[cfg(target_os = "macos")]
 use crate::AxObserverBridge;
 use accessibility_ng::{AXObserver, AXUIElement};
@@ -17,7 +17,6 @@ use accessibility_sys_ng::{
 };
 use active_win_pos_rs::get_active_window;
 use core_foundation::runloop::{kCFRunLoopDefaultMode, CFRunLoop};
-use core_graphics_types::geometry::CGRect;
 use macos_accessibility_client::accessibility::application_is_trusted;
 use std::collections::VecDeque;
 use std::ffi::c_void;
