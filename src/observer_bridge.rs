@@ -7,6 +7,7 @@
 /// - `bridge` — generated unit struct name (e.g., `WindowsObserverBridge`)
 /// - `lifecycle_hook_type` — generated `fn(bool)` type alias name
 /// - `test_lock_fn` — `#[cfg(test)] pub(crate)` test-serialization lock function name
+#[cfg(any(feature = "windows-beta", feature = "linux-alpha"))]
 macro_rules! define_observer_bridge {
     (
         bridge = $Bridge:ident,
@@ -267,4 +268,5 @@ macro_rules! define_observer_bridge {
     };
 }
 
+#[cfg(any(feature = "windows-beta", feature = "linux-alpha"))]
 pub(crate) use define_observer_bridge;

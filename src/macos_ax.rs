@@ -7,6 +7,7 @@ use core_foundation::base::CFType;
 #[cfg(feature = "rich-content")]
 use core_foundation::data::CFData;
 use core_foundation::string::CFString;
+#[cfg(feature = "rich-content")]
 use macos_accessibility_client::accessibility::application_is_trusted;
 use std::process::Command;
 

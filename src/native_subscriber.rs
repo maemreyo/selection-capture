@@ -13,6 +13,7 @@
 /// - `set_adapter_fn` — `pub fn` that sets the runtime adapter
 /// - `adapter_registered_fn` — `pub fn` that checks whether an adapter is installed
 /// - `reset_fn` — `#[cfg(test)] fn` that resets all state for test isolation
+#[cfg(any(feature = "windows-beta", feature = "linux-alpha"))]
 macro_rules! define_native_subscriber_core {
     (
         observer_bridge = $ObserverBridge:ident,
@@ -144,4 +145,5 @@ macro_rules! define_native_subscriber_core {
     };
 }
 
+#[cfg(any(feature = "windows-beta", feature = "linux-alpha"))]
 pub(crate) use define_native_subscriber_core;
