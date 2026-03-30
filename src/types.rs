@@ -1,4 +1,5 @@
 use crate::profile::TriState;
+use core_graphics_types::geometry::CGRect;
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -139,30 +140,33 @@ impl Default for CaptureTrace {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct CaptureSuccess {
     pub text: String,
     pub method: CaptureMethod,
-    pub focused_window_frame: Option<WindowFrame>,
+    pub focused_window_frame: Option<CGRect>,
     pub trace: Option<CaptureTrace>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WindowFrame {
-    pub x: i64,
-    pub y: i64,
-    pub width: i64,
-    pub height: i64,
+impl PartialEq for CaptureSuccess {
+    fn eq(&self, other: &Self) -> bool {
+        self.text == other.text
+            && self.method == other.method
+            && self.trace == other.trace
+            && rect_option_eq(self.focused_window_frame, other.focused_window_frame)
+    }
 }
 
-impl WindowFrame {
-    pub fn from_f64(x: f64, y: f64, width: f64, height: f64) -> Self {
-        Self {
-            x: x.round() as i64,
-            y: y.round() as i64,
-            width: width.round() as i64,
-            height: height.round() as i64,
+fn rect_option_eq(left: Option<CGRect>, right: Option<CGRect>) -> bool {
+    match (left, right) {
+        (Some(a), Some(b)) => {
+            a.origin.x.to_bits() == b.origin.x.to_bits()
+                && a.origin.y.to_bits() == b.origin.y.to_bits()
+                && a.size.width.to_bits() == b.size.width.to_bits()
+                && a.size.height.to_bits() == b.size.height.to_bits()
         }
+        (None, None) => true,
+        _ => false,
     }
 }
 
@@ -183,7 +187,7 @@ pub struct CaptureFailure {
     pub context: CaptureFailureContext,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CaptureOutcome {
     Success(CaptureSuccess),
     Failure(CaptureFailure),

@@ -3,10 +3,11 @@ use crate::ax_observer_drain_events_for_monitor;
 #[cfg(feature = "rich-content")]
 pub(crate) use crate::macos_ax::try_selected_rtf_by_ax;
 use crate::macos_ax::{
-    get_selected_text_by_ax, run_clipboard_borrow_script, ClipboardBorrowResult,
+    focused_window_frame_by_ax, get_selected_text_by_ax, run_clipboard_borrow_script,
+    ClipboardBorrowResult,
 };
 use crate::traits::{CapturePlatform, MonitorPlatform};
-use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult, WindowFrame};
+use crate::types::{ActiveApp, CaptureMethod, CleanupStatus, PlatformAttemptResult};
 #[cfg(target_os = "macos")]
 use crate::AxObserverBridge;
 use accessibility_ng::{AXObserver, AXUIElement};
@@ -16,6 +17,7 @@ use accessibility_sys_ng::{
 };
 use active_win_pos_rs::get_active_window;
 use core_foundation::runloop::{kCFRunLoopDefaultMode, CFRunLoop};
+use core_graphics_types::geometry::CGRect;
 use macos_accessibility_client::accessibility::application_is_trusted;
 use std::collections::VecDeque;
 use std::ffi::c_void;
@@ -433,14 +435,8 @@ impl CapturePlatform for MacOSPlatform {
         self.active_app_inner()
     }
 
-    fn focused_window_frame(&self) -> Option<WindowFrame> {
-        let window = get_active_window().ok()?;
-        Some(WindowFrame::from_f64(
-            window.position.x,
-            window.position.y,
-            window.position.width,
-            window.position.height,
-        ))
+    fn focused_window_frame(&self) -> Option<CGRect> {
+        focused_window_frame_by_ax()
     }
 
     fn attempt(&self, method: CaptureMethod, _app: Option<&ActiveApp>) -> PlatformAttemptResult {

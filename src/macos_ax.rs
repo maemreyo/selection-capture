@@ -1,12 +1,16 @@
-use accessibility_ng::{AXAttribute, AXUIElement};
+use accessibility_ng::{AXAttribute, AXUIElement, AXValue};
 #[cfg(feature = "rich-content")]
 use accessibility_sys_ng::kAXRTFForRangeParameterizedAttribute;
-use accessibility_sys_ng::{kAXFocusedUIElementAttribute, kAXSelectedTextAttribute};
+use accessibility_sys_ng::{
+    kAXFocusedUIElementAttribute, kAXFocusedWindowAttribute, kAXPositionAttribute,
+    kAXSelectedTextAttribute, kAXSizeAttribute,
+};
 #[cfg(feature = "rich-content")]
 use core_foundation::base::CFType;
 #[cfg(feature = "rich-content")]
 use core_foundation::data::CFData;
 use core_foundation::string::CFString;
+use core_graphics_types::geometry::{CGPoint, CGRect, CGSize};
 #[cfg(feature = "rich-content")]
 use macos_accessibility_client::accessibility::application_is_trusted;
 use std::process::Command;
@@ -36,6 +40,42 @@ pub(crate) fn get_selected_text_by_ax() -> Result<String, String> {
     };
 
     Ok(selected_text.to_string())
+}
+
+pub(crate) fn focused_window_frame_by_ax() -> Option<CGRect> {
+    let system_element = AXUIElement::system_wide();
+    let focused_window = system_element
+        .attribute(&AXAttribute::new(&CFString::from_static_string(
+            kAXFocusedWindowAttribute,
+        )))
+        .map(|window| window.downcast_into::<AXUIElement>())
+        .ok()
+        .flatten()?;
+
+    let position = focused_window
+        .attribute(&AXAttribute::new(&CFString::from_static_string(
+            kAXPositionAttribute,
+        )))
+        .map(|value| value.downcast_into::<AXValue>())
+        .ok()
+        .flatten()?
+        .get_value::<CGPoint>()
+        .ok()?;
+
+    let size = focused_window
+        .attribute(&AXAttribute::new(&CFString::from_static_string(
+            kAXSizeAttribute,
+        )))
+        .map(|value| value.downcast_into::<AXValue>())
+        .ok()
+        .flatten()?
+        .get_value::<CGSize>()
+        .ok()?;
+
+    Some(CGRect {
+        origin: position,
+        size,
+    })
 }
 
 #[cfg(feature = "rich-content")]

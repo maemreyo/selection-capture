@@ -1,8 +1,8 @@
 use crate::profile::{AppProfile, AppProfileUpdate};
 use crate::types::{
-    ActiveApp, CaptureFailureContext, CaptureMethod, CleanupStatus, PlatformAttemptResult,
-    UserHint, WindowFrame,
+    ActiveApp, CaptureFailureContext, CaptureMethod, CleanupStatus, PlatformAttemptResult, UserHint,
 };
+use core_graphics_types::geometry::CGRect;
 
 pub trait CancelSignal {
     fn is_cancelled(&self) -> bool;
@@ -21,7 +21,7 @@ pub trait AppAdapter: Send + Sync {
 
 pub trait CapturePlatform {
     fn active_app(&self) -> Option<ActiveApp>;
-    fn focused_window_frame(&self) -> Option<WindowFrame> {
+    fn focused_window_frame(&self) -> Option<CGRect> {
         None
     }
     fn attempt(&self, method: CaptureMethod, app: Option<&ActiveApp>) -> PlatformAttemptResult;
